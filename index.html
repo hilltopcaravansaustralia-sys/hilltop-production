@@ -8,7 +8,6 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         * {
             margin: 0;
@@ -48,10 +47,11 @@
             const [activeTask, setActiveTask] = useState(null);
             const [timer, setTimer] = useState(0);
             const [isRunning, setIsRunning] = useState(false);
+            const [isPaused, setIsPaused] = useState(false);
             const [pauseReason, setPauseReason] = useState(null);
-            const [photos, setPhotos] = useState([]);
             const [supervisorPin, setSupervisorPin] = useState('');
             const [rejectionReason, setRejectionReason] = useState('');
+            const [completedTasks, setCompletedTasks] = useState([]);
 
             const HILLTOP_COLORS = {
                 orange: '#F5A623',
@@ -74,13 +74,13 @@
             // Timer effect
             useEffect(() => {
                 let interval;
-                if (isRunning) {
+                if (isRunning && !isPaused) {
                     interval = setInterval(() => {
                         setTimer(prev => prev + 1);
                     }, 1000);
                 }
                 return () => clearInterval(interval);
-            }, [isRunning]);
+            }, [isRunning, isPaused]);
 
             const handleLogin = async () => {
                 setLoading(true);
@@ -127,16 +127,22 @@
                 setLoading(false);
             };
 
-            const startTask = (task) => {
+            const selectTask = (task) => {
                 setActiveTask(task);
                 setTimer(0);
-                setIsRunning(true);
+                setIsRunning(false);
+                setIsPaused(false);
                 setPauseReason(null);
                 setScreen('task-detail');
             };
 
+            const handleStart = () => {
+                setIsRunning(true);
+                setIsPaused(false);
+            };
+
             const handlePause = () => {
-                setIsRunning(false);
+                setIsPaused(true);
                 setScreen('pause-reason');
             };
 
@@ -145,30 +151,13 @@
                 setScreen('task-detail');
             };
 
-            const finishTask = () => {
-                setIsRunning(false);
-                setScreen('photos');
+            const handleResume = () => {
+                setIsPaused(false);
             };
 
-            const uploadPhotos = async () => {
-                if (photos.length < 4) {
-                    alert('Please take all 4 photos');
-                    return;
-                }
-                setScreen('supervisor-signoff');
-            };
-
-            const supervisorApprove = async () => {
+            const finishTask = async () => {
                 setLoading(true);
                 try {
-                    const { data: supervisor } = await supabase
-                        .from('workers')
-                        .select('*')
-                        .eq('pin', supervisorPin)
-                        .single();
-
-                    if (!supervisor) throw new Error('Invalid supervisor PIN');
-
                     await supabase.from('task_instances').insert([{
                         worker_id: worker.id,
                         van_id: 1,
@@ -177,59 +166,18 @@
                         finished_at: new Date().toISOString(),
                         total_elapsed_minutes: Math.floor(timer / 60),
                         active_work_minutes: Math.floor(timer / 60),
-                        signoff_status: 'approved',
-                        supervisor_signoff_id: supervisor.id,
-                        supervisor_signoff_at: new Date().toISOString()
+                        signoff_status: 'pending'
                     }]);
 
-                    alert('Task approved!');
-                    setSupervisorPin('');
-                    setRejectionReason('');
-                    setPhotos([]);
+                    setCompletedTasks([...completedTasks, activeTask.task_name]);
+                    setActiveTask(null);
+                    setTimer(0);
+                    setIsRunning(false);
+                    setIsPaused(false);
+                    setPauseReason(null);
                     setScreen('task-list');
                 } catch (err) {
-                    alert('Supervisor PIN invalid');
-                }
-                setLoading(false);
-            };
-
-            const supervisorReject = async () => {
-                if (!rejectionReason) {
-                    alert('Please provide rejection reason');
-                    return;
-                }
-                setLoading(true);
-                try {
-                    const { data: supervisor } = await supabase
-                        .from('workers')
-                        .select('*')
-                        .eq('pin', supervisorPin)
-                        .single();
-
-                    if (!supervisor) throw new Error('Invalid supervisor PIN');
-
-                    await supabase.from('task_instances').insert([{
-                        worker_id: worker.id,
-                        van_id: 1,
-                        task_template_id: activeTask.id,
-                        started_at: new Date().toISOString(),
-                        finished_at: new Date().toISOString(),
-                        total_elapsed_minutes: Math.floor(timer / 60),
-                        active_work_minutes: Math.floor(timer / 60),
-                        signoff_status: 'rejected',
-                        supervisor_signoff_id: supervisor.id,
-                        supervisor_signoff_at: new Date().toISOString(),
-                        rejection_reason: rejectionReason,
-                        rejection_count: 1
-                    }]);
-
-                    alert('Task rejected. Worker needs to redo.');
-                    setSupervisorPin('');
-                    setRejectionReason('');
-                    setPhotos([]);
-                    setScreen('task-list');
-                } catch (err) {
-                    alert('Supervisor PIN invalid');
+                    alert('Error saving task');
                 }
                 setLoading(false);
             };
@@ -239,7 +187,7 @@
                 setScreen('login');
                 setPinInput('');
                 setTasks([]);
-                setPhotos([]);
+                setCompletedTasks([]);
             };
 
             // LOGIN SCREEN
@@ -300,7 +248,7 @@
                                 {loading ? 'Loading...' : 'Login'}
                             </button>
                             <p style={{ fontSize: '12px', color: '#999', marginTop: '20px', textAlign: 'center' }}>
-                                Test PINs: 1001 (Gaya), 1002 (Tharinda), 2001 (Ruwan), 7777 (Dasun)
+                                Test PINs: 1001, 1002, 2001, 7777
                             </p>
                         </div>
                     </div>
@@ -385,6 +333,7 @@
                             {tasks.map((task, idx) => (
                                 <div
                                     key={idx}
+                                    onClick={() => selectTask(task)}
                                     style={{
                                         background: 'white',
                                         padding: '16px',
@@ -394,13 +343,23 @@
                                         cursor: 'pointer',
                                         transition: 'all 0.2s'
                                     }}
-                                    onClick={() => startTask(task)}
                                 >
                                     <h3 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '8px' }}>{task.task_name}</h3>
-                                    <p style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>{task.station}</p>
+                                    <p style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>{task.station || 'Station'}</p>
                                     <p style={{ color: HILLTOP_COLORS.orange, fontWeight: 'bold' }}>⏱️ {task.allocated_minutes} min</p>
                                 </div>
                             ))}
+
+                            {completedTasks.length > 0 && (
+                                <div style={{ marginTop: '30px', padding: '20px', background: HILLTOP_COLORS.green, borderRadius: '8px', color: 'white' }}>
+                                    <h3 style={{ marginBottom: '10px' }}>✓ Completed Today:</h3>
+                                    <ul style={{ listStyle: 'none' }}>
+                                        {completedTasks.map((task, idx) => (
+                                            <li key={idx} style={{ paddingBottom: '8px' }}>✓ {task}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
                         </div>
                     </div>
                 );
@@ -409,6 +368,8 @@
             // TASK DETAIL
             if (screen === 'task-detail') {
                 const getTimerColor = () => {
+                    if (!isRunning && !isPaused) return HILLTOP_COLORS.charcoal;
+                    if (isPaused) return HILLTOP_COLORS.yellow;
                     const percentOver = ((timer - (activeTask.allocated_minutes * 60)) / (activeTask.allocated_minutes * 60)) * 100;
                     if (percentOver < 0) return HILLTOP_COLORS.green;
                     if (percentOver < 20) return HILLTOP_COLORS.yellow;
@@ -425,7 +386,7 @@
                 return (
                     <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
                         <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-                            <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>{activeTask.task_name}</h2>
+                            <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>{activeTask?.task_name}</h2>
                             
                             <div style={{
                                 background: getTimerColor(),
@@ -438,42 +399,103 @@
                                 <div style={{ fontSize: '48px', fontWeight: 'bold', marginBottom: '10px' }}>
                                     {formatTime(timer)}
                                 </div>
-                                <div style={{ fontSize: '16px' }}>Allocated: {activeTask.allocated_minutes} min</div>
+                                <div style={{ fontSize: '16px' }}>Allocated: {activeTask?.allocated_minutes} min</div>
+                                {isPaused && <div style={{ fontSize: '14px', marginTop: '10px' }}>⏸️ PAUSED: {pauseReason}</div>}
                             </div>
 
-                            <button
-                                onClick={handlePause}
-                                style={{
-                                    width: '100%',
-                                    padding: '14px',
-                                    background: HILLTOP_COLORS.red,
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    fontSize: '16px',
-                                    fontWeight: 'bold',
-                                    marginBottom: '12px',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                ⏸️ PAUSE
-                            </button>
+                            {!isRunning && (
+                                <button
+                                    onClick={handleStart}
+                                    style={{
+                                        width: '100%',
+                                        padding: '14px',
+                                        background: HILLTOP_COLORS.green,
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '8px',
+                                        fontSize: '16px',
+                                        fontWeight: 'bold',
+                                        marginBottom: '12px',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    ▶️ START TASK
+                                </button>
+                            )}
+
+                            {isRunning && !isPaused && (
+                                <button
+                                    onClick={handlePause}
+                                    style={{
+                                        width: '100%',
+                                        padding: '14px',
+                                        background: HILLTOP_COLORS.red,
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '8px',
+                                        fontSize: '16px',
+                                        fontWeight: 'bold',
+                                        marginBottom: '12px',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    ⏸️ PAUSE
+                                </button>
+                            )}
+
+                            {isPaused && (
+                                <button
+                                    onClick={handleResume}
+                                    style={{
+                                        width: '100%',
+                                        padding: '14px',
+                                        background: HILLTOP_COLORS.green,
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '8px',
+                                        fontSize: '16px',
+                                        fontWeight: 'bold',
+                                        marginBottom: '12px',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    ▶️ RESUME
+                                </button>
+                            )}
 
                             <button
                                 onClick={finishTask}
+                                disabled={!isRunning || isPaused}
                                 style={{
                                     width: '100%',
                                     padding: '14px',
-                                    background: HILLTOP_COLORS.orange,
+                                    background: (isRunning && !isPaused) ? HILLTOP_COLORS.orange : '#ccc',
                                     color: 'white',
                                     border: 'none',
                                     borderRadius: '8px',
                                     fontSize: '16px',
                                     fontWeight: 'bold',
-                                    cursor: 'pointer'
+                                    cursor: (isRunning && !isPaused) ? 'pointer' : 'not-allowed'
                                 }}
                             >
                                 ✓ FINISH TASK
+                            </button>
+
+                            <button
+                                onClick={() => setScreen('task-list')}
+                                style={{
+                                    width: '100%',
+                                    padding: '10px',
+                                    background: '#999',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    marginTop: '12px',
+                                    cursor: 'pointer',
+                                    fontSize: '14px'
+                                }}
+                            >
+                                ← Back to Tasks
                             </button>
                         </div>
                     </div>
@@ -508,137 +530,6 @@
                                     {reason}
                                 </button>
                             ))}
-                        </div>
-                    </div>
-                );
-            }
-
-            // PHOTOS SCREEN
-            if (screen === 'photos') {
-                const angles = ['Front', 'Left', 'Right', 'Back'];
-                return (
-                    <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
-                        <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-                            <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>Take Photos (4 angles)</h2>
-                            
-                            {angles.map((angle, idx) => (
-                                <button
-                                    key={idx}
-                                    onClick={() => setPhotos([...photos, angle])}
-                                    style={{
-                                        width: '100%',
-                                        padding: '16px',
-                                        background: photos.includes(angle) ? HILLTOP_COLORS.green : HILLTOP_COLORS.orange,
-                                        color: 'white',
-                                        border: 'none',
-                                        borderRadius: '8px',
-                                        marginBottom: '12px',
-                                        fontSize: '16px',
-                                        fontWeight: 'bold',
-                                        cursor: 'pointer'
-                                    }}
-                                >
-                                    {photos.includes(angle) ? '✓' : '📷'} Photo: {angle}
-                                </button>
-                            ))}
-
-                            <button
-                                onClick={uploadPhotos}
-                                disabled={photos.length < 4}
-                                style={{
-                                    width: '100%',
-                                    padding: '14px',
-                                    background: photos.length === 4 ? HILLTOP_COLORS.orange : '#ccc',
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    fontSize: '16px',
-                                    fontWeight: 'bold',
-                                    marginTop: '20px',
-                                    cursor: photos.length === 4 ? 'pointer' : 'not-allowed'
-                                }}
-                            >
-                                Continue ({photos.length}/4)
-                            </button>
-                        </div>
-                    </div>
-                );
-            }
-
-            // SUPERVISOR SIGN-OFF
-            if (screen === 'supervisor-signoff') {
-                return (
-                    <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
-                        <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-                            <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>Supervisor Approval</h2>
-                            
-                            <input
-                                type="password"
-                                placeholder="Supervisor PIN"
-                                value={supervisorPin}
-                                onChange={(e) => setSupervisorPin(e.target.value)}
-                                style={{
-                                    width: '100%',
-                                    padding: '12px',
-                                    fontSize: '16px',
-                                    border: `2px solid ${HILLTOP_COLORS.orange}`,
-                                    borderRadius: '8px',
-                                    marginBottom: '20px'
-                                }}
-                            />
-
-                            <textarea
-                                placeholder="Rejection reason (if rejecting)"
-                                value={rejectionReason}
-                                onChange={(e) => setRejectionReason(e.target.value)}
-                                style={{
-                                    width: '100%',
-                                    padding: '12px',
-                                    fontSize: '16px',
-                                    border: `2px solid #ddd`,
-                                    borderRadius: '8px',
-                                    marginBottom: '20px',
-                                    minHeight: '80px',
-                                    fontFamily: 'inherit'
-                                }}
-                            />
-
-                            <button
-                                onClick={supervisorApprove}
-                                disabled={!supervisorPin || loading}
-                                style={{
-                                    width: '100%',
-                                    padding: '14px',
-                                    background: HILLTOP_COLORS.green,
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    fontSize: '16px',
-                                    fontWeight: 'bold',
-                                    marginBottom: '12px',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                ✓ APPROVE
-                            </button>
-
-                            <button
-                                onClick={supervisorReject}
-                                disabled={!supervisorPin || !rejectionReason || loading}
-                                style={{
-                                    width: '100%',
-                                    padding: '14px',
-                                    background: HILLTOP_COLORS.red,
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    fontSize: '16px',
-                                    fontWeight: 'bold',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                ✗ REJECT
-                            </button>
                         </div>
                     </div>
                 );
