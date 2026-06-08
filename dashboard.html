@@ -52,6 +52,7 @@
             { key:'Building', dept:'Building', station:null }
         ];
         const todayStr = () => new Date().toISOString().split('T')[0];
+        const NON_BLOCKER = ['Tea break','Lunch break','Toilet break','Helping another worker'];
         const fmtDate = (s)=> s? new Date(s).toLocaleDateString('en-AU',{day:'numeric',month:'short'}) : '—';
         const hhmm = (m)=>{ const h=Math.floor(m/60), mm=Math.round(m%60); return h>0?`${h}h ${mm}m`:`${mm}m`; };
         const since = (iso)=>{ const mins=Math.floor((Date.now()-new Date(iso).getTime())/60000); if(mins<60) return `${mins} min ago`; const h=Math.floor(mins/60); return `${h}h ${mins%60}m ago`; };
@@ -290,8 +291,12 @@
             const lines={};
             [1,2,3].forEach(L=>{ const v=nextOut[L]; if(!v){ lines[L]={count:0,van:null}; return; } const o=overall(v); const stg=curStage(v); lines[L]={count:byLine[L].length,van:v,badge:dueBadge(v),pct:o.pct,stage:stg,daysIn:v.start_date?daysBetween(v.start_date,todayStr()):'—',worker:vanWorkerNow(v.id),nextDept:nextDeptOf(stg),status:vanStatus(v,o.pct)}; });
 
+            // only today's open pauses, and split breaks from real blockers
+            const openToday = openPauses.filter(p => p.pause_start && p.pause_start.slice(0,10)===todayStr());
+            const realBlockers = openToday.filter(p => !NON_BLOCKER.includes(rName(p.pause_reason_id)));
+
             // KPIs
-            const blockedVanIds=new Set(openPauses.map(p=>{ const i=instById[p.task_instance_id]; return i?i.van_id:null; }).filter(Boolean));
+            const blockedVanIds=new Set(realBlockers.map(p=>{ const i=instById[p.task_instance_id]; return i?i.van_id:null; }).filter(Boolean));
             const lateCount=vans.filter(v=>{ const o=overall(v); return v.target_completion_date && daysBetween(todayStr(),v.target_completion_date)<0 && o.pct<100; }).length;
             const onTrack=vans.filter(v=>vanStatus(v,overall(v).pct).t==='ON TRACK').length;
             const activeWorkerIds=new Set(inst.filter(x=>x.started_at&&!x.finished_at).map(x=>x.worker_id));
@@ -313,7 +318,7 @@
             });
 
             // workforce
-            const pausedIds=new Set(openPauses.map(p=>p.worker_id));
+            const pausedIds=new Set(openToday.map(p=>p.worker_id));
             const wf={ signedOn:signedOnIds.size, active:activeWorkerIds.size, paused:pausedIds.size, idle:Math.max(0, signedOnIds.size - activeWorkerIds.size - pausedIds.size) };
 
             // performers (efficiency from finished tasks today)
@@ -326,7 +331,7 @@
                 .map(v=>{ const d=daysBetween(todayStr(),v.target_completion_date); return {...v,dleft:d===0?'today':d===1?'tomorrow':`in ${d} days`}; });
 
             // blockers
-            const blockers=openPauses.map(p=>{ const i=instById[p.task_instance_id]; const v=vans.find(x=>x.id===(i&&i.van_id)); return v?{chassis:v.chassis_number,reason:rName(p.pause_reason_id),who:wName(p.worker_id),ago:since(p.pause_start)}:null; }).filter(Boolean);
+            const blockers=realBlockers.map(p=>{ const i=instById[p.task_instance_id]; const v=vans.find(x=>x.id===(i&&i.van_id)); return v?{chassis:v.chassis_number,reason:rName(p.pause_reason_id),who:wName(p.worker_id),ago:since(p.pause_start)}:null; }).filter(Boolean);
 
             const slides=['exec','ops'];
             const idx=slide%slides.length;

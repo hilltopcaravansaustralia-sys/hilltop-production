@@ -193,8 +193,22 @@
                 setLoading(false);
             };
 
+            const closeOpenPausesFor = async (key, val) => {
+                try {
+                    const q = supabase.from('pause_logs').select('id,pause_start').is('pause_end', null);
+                    const { data: openP } = await (key === 'instance' ? q.eq('task_instance_id', val) : q.eq('worker_id', val));
+                    if (openP && openP.length) {
+                        await Promise.all(openP.map(p => supabase.from('pause_logs').update({
+                            pause_end: nowIso(),
+                            pause_minutes: Math.max(0, Math.round((Date.now() - new Date(p.pause_start).getTime()) / 60000))
+                        }).eq('id', p.id)));
+                    }
+                } catch (e) {}
+            };
+
             const logout = () => {
                 clearInterval(tick.current);
+                if (worker) closeOpenPausesFor('worker', worker.id); // tidy any open pause so it can't linger on the board
                 setWorker(null); setPin(''); setScreen('login'); setPpe(false); setWhs(false);
                 setVans([]); setDeptTasks([]); setCompletions({}); setSelectedVan(null);
                 setActiveTask(null); setActiveInstanceId(null); setStartedAt(null);
@@ -230,6 +244,7 @@
             const completeTask = async () => {
                 setLoading(true);
                 try {
+                    await closeOpenPausesFor('instance', activeInstanceId); // never leave a pause open on a finished task
                     const activeSec = running && segStart ? baseSec + Math.floor((Date.now() - segStart) / 1000) : baseSec;
                     const activeMin = Math.max(0, Math.round(activeSec / 60));
                     const finishedIso = nowIso();
@@ -353,7 +368,7 @@
                                 <button onClick={doLogin} disabled={loading || !pin} style={{ width: '100%', padding: 16, background: 'var(--orange)', color: 'var(--ink)', border: 'none', borderRadius: 12, fontSize: 17, fontWeight: 700, cursor: 'pointer', opacity: (loading || !pin) ? 0.5 : 1 }}>
                                     {loading ? 'Checking…' : 'Sign in'}
                                 </button>
-                                <div style={{ textAlign: 'center', marginTop: 14, fontSize: 11, color: '#B6BBC4', letterSpacing: '0.05em' }}>BUILD 2.4 · DASHBOARD</div>
+                                <div style={{ textAlign: 'center', marginTop: 14, fontSize: 11, color: '#B6BBC4', letterSpacing: '0.05em' }}>BUILD 2.5 · PAUSES</div>
                             </div>
                         </div>
                     </div>
