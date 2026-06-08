@@ -222,6 +222,17 @@
                 setLoading(true);
                 try {
                     const today = new Date().toISOString().split('T')[0];
+                    
+                    // Check if this is a NEW day (different from stored todayDate)
+                    const isNewDay = todayDate !== today;
+                    
+                    if (isNewDay) {
+                        console.log('📅 New day detected! Clearing yesterday\'s session data.');
+                        // It's a new day - clear completed tasks from yesterday
+                        setCompletedTaskIds([]);
+                        setCompletedTaskDetails([]);
+                    }
+                    
                     setTodayDate(today);
                     
                     await supabase.from('daily_signoffs').insert([{
@@ -238,7 +249,7 @@
                         .eq('department', worker.department)
                         .order('sequence_order', { ascending: true });
                     
-                    // Fetch completed tasks for today
+                    // Fetch completed tasks for TODAY ONLY
                     const { data: completedData } = await supabase
                         .from('task_instances')
                         .select('id, task_template_id, started_at, finished_at, total_elapsed_minutes')
@@ -246,7 +257,7 @@
                         .gte('created_at', today + 'T00:00:00')
                         .lte('created_at', today + 'T23:59:59');
                     
-                    // Extract completed task IDs
+                    // Extract completed task IDs for today only
                     const completedIds = (completedData || []).map(t => t.task_template_id);
                     setCompletedTaskIds(completedIds);
                     setCompletedTaskDetails(completedData || []);
@@ -255,6 +266,8 @@
                     const incompleteTasks = (tasksData || []).filter(t => !completedIds.includes(t.id));
                     setTasks(incompleteTasks);
                     setScreen('task-list');
+                    
+                    console.log('✅ Sign-off complete. Tasks loaded for today.');
                 } catch (err) {
                     alert('Error during sign-off: ' + err.message);
                     console.error(err);
