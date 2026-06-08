@@ -47,6 +47,7 @@
             const [tasks, setTasks] = useState([]);
             const [currentWorkDay, setCurrentWorkDay] = useState(1);
             const [allTasksTemplate, setAllTasksTemplate] = useState([]);
+            const [endOfDayTriggered, setEndOfDayTriggered] = useState(false);
             const [activeTask, setActiveTask] = useState(null);
             const [timer, setTimer] = useState(0);
             const [isRunning, setIsRunning] = useState(false);
@@ -186,18 +187,15 @@
 
             const finishTask = () => {
                 setIsRunning(false);
-                
-                // Check if this is the last task of the current work_day
-                const dayTasks = tasks.filter(t => t.work_day === currentWorkDay);
-                const isLastTaskOfDay = activeTask && activeTask.task_name && activeTask.task_name.toLowerCase().includes('clean');
-                
-                if (isLastTaskOfDay) {
-                    // Show photos only for the "Clean" task (last task of day)
-                    setScreen('photos');
-                } else {
-                    // For all other tasks, go straight to supervisor signoff
-                    setScreen('supervisor-signoff');
-                }
+                // Just go back to task list - no photos, no supervisor yet
+                setScreen('task-list');
+            };
+
+            const endOfDaySignoff = () => {
+                // Worker clicked "I've Finished My Work for Today"
+                setEndOfDayTriggered(true);
+                setPhotos([]); // Reset photos for fresh capture
+                setScreen('photos');
             };
 
             const uploadPhotos = async () => {
@@ -205,6 +203,7 @@
                     alert('Please take all 4 photos');
                     return;
                 }
+                // After photos, show supervisor signoff waiting screen
                 setScreen('supervisor-signoff');
             };
 
@@ -219,28 +218,33 @@
 
                     if (!supervisor) throw new Error('Invalid supervisor PIN');
 
-                    await supabase.from('task_instances').insert([{
-                        worker_id: worker.id,
-                        van_id: 1,
-                        task_template_id: activeTask.id,
-                        started_at: new Date().toISOString(),
-                        finished_at: new Date().toISOString(),
-                        total_elapsed_minutes: Math.floor(timer / 60),
-                        active_work_minutes: Math.floor(timer / 60),
-                        signoff_status: 'approved',
-                        supervisor_signoff_id: supervisor.id,
-                        supervisor_signoff_at: new Date().toISOString()
-                    }]);
-
-                    alert('Task approved!');
-                    setSupervisorPin('');
-                    setRejectionReason('');
-                    setPhotos([]);
-                    
-                    // Check if day is complete and advance
-                    await checkAndAdvanceDay(activeTask.id);
-                    
-                    setScreen('task-list');
+                    if (endOfDayTriggered) {
+                        // End of day: Mark all tasks for today as complete
+                        const dayTasks = allTasksTemplate.filter(t => t.work_day === currentWorkDay);
+                        
+                        // Insert one record per task as approved
+                        const taskRecords = dayTasks.map(task => ({
+                            worker_id: worker.id,
+                            van_id: 1,
+                            task_template_id: task.id,
+                            started_at: new Date().toISOString(),
+                            finished_at: new Date().toISOString(),
+                            total_elapsed_minutes: 0,
+                            active_work_minutes: 0,
+                            signoff_status: 'approved',
+                            supervisor_signoff_id: supervisor.id,
+                            supervisor_signoff_at: new Date().toISOString()
+                        }));
+                        
+                        await supabase.from('task_instances').insert(taskRecords);
+                        
+                        alert('✓ Day Complete! Your work for today is approved.');
+                        setSupervisorPin('');
+                        setPhotos([]);
+                        setEndOfDayTriggered(false);
+                        setTasks([]);
+                        setScreen('task-list');
+                    }
                 } catch (err) {
                     alert('Supervisor PIN invalid');
                 }
@@ -248,6 +252,11 @@
             };
 
             const supervisorReject = async () => {
+                if (endOfDayTriggered) {
+                    alert('Cannot reject end-of-day signoff. Please approve to complete.');
+                    return;
+                }
+                
                 if (!rejectionReason) {
                     alert('Please provide rejection reason');
                     return;
@@ -296,6 +305,7 @@
                 setPhotos([]);
                 setCurrentWorkDay(1);
                 setAllTasksTemplate([]);
+                setEndOfDayTriggered(false);
             };
 
             // LOGIN SCREEN
@@ -456,25 +466,45 @@
                                     ✓ Day {currentWorkDay} Complete!
                                 </div>
                             ) : (
-                                tasks.map((task, idx) => (
-                                    <div
-                                        key={idx}
+                                <>
+                                    {tasks.map((task, idx) => (
+                                        <div
+                                            key={idx}
+                                            style={{
+                                                background: 'white',
+                                                padding: '16px',
+                                                marginBottom: '12px',
+                                                borderRadius: '8px',
+                                                border: `2px solid ${HILLTOP_COLORS.orange}`,
+                                                cursor: 'pointer',
+                                                transition: 'all 0.2s'
+                                            }}
+                                            onClick={() => startTask(task)}
+                                        >
+                                            <h3 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '8px' }}>{task.task_name}</h3>
+                                            <p style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>{task.station}</p>
+                                            <p style={{ color: HILLTOP_COLORS.orange, fontWeight: 'bold' }}>⏱️ {task.allocated_minutes} min</p>
+                                        </div>
+                                    ))}
+                                    
+                                    <button
+                                        onClick={endOfDaySignoff}
                                         style={{
-                                            background: 'white',
+                                            width: '100%',
                                             padding: '16px',
-                                            marginBottom: '12px',
+                                            background: '#FF6B00',
+                                            color: 'white',
+                                            border: 'none',
                                             borderRadius: '8px',
-                                            border: `2px solid ${HILLTOP_COLORS.orange}`,
-                                            cursor: 'pointer',
-                                            transition: 'all 0.2s'
+                                            fontSize: '16px',
+                                            fontWeight: 'bold',
+                                            marginTop: '20px',
+                                            cursor: 'pointer'
                                         }}
-                                        onClick={() => startTask(task)}
                                     >
-                                        <h3 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '8px' }}>{task.task_name}</h3>
-                                        <p style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>{task.station}</p>
-                                        <p style={{ color: HILLTOP_COLORS.orange, fontWeight: 'bold' }}>⏱️ {task.allocated_minutes} min</p>
-                                    </div>
-                                ))
+                                        ✓ I've Finished My Work for Today
+                                    </button>
+                                </>
                             )}
                         </div>
                     </div>
@@ -645,7 +675,34 @@
                 return (
                     <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
                         <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-                            <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>Supervisor Approval</h2>
+                            {endOfDayTriggered ? (
+                                <>
+                                    <div style={{
+                                        background: 'white',
+                                        padding: '40px',
+                                        borderRadius: '12px',
+                                        textAlign: 'center',
+                                        marginBottom: '30px',
+                                        border: `3px solid ${HILLTOP_COLORS.yellow}`
+                                    }}>
+                                        <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '10px' }}>
+                                            ⏳ Awaiting Supervisor Sign-Off
+                                        </h2>
+                                        <p style={{ color: '#666', fontSize: '16px', marginBottom: '20px' }}>
+                                            Work for the day is complete. Waiting for supervisor approval.
+                                        </p>
+                                        <p style={{ color: HILLTOP_COLORS.orange, fontSize: '14px', fontWeight: 'bold' }}>
+                                            Photos have been taken and saved.
+                                        </p>
+                                    </div>
+
+                                    <h3 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px', textAlign: 'center' }}>
+                                        Supervisor PIN Required
+                                    </h3>
+                                </>
+                            ) : (
+                                <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>Supervisor Approval</h2>
+                            )}
                             
                             <input
                                 type="password"
@@ -662,21 +719,23 @@
                                 }}
                             />
 
-                            <textarea
-                                placeholder="Rejection reason (if rejecting)"
-                                value={rejectionReason}
-                                onChange={(e) => setRejectionReason(e.target.value)}
-                                style={{
-                                    width: '100%',
-                                    padding: '12px',
-                                    fontSize: '16px',
-                                    border: `2px solid #ddd`,
-                                    borderRadius: '8px',
-                                    marginBottom: '20px',
-                                    minHeight: '80px',
-                                    fontFamily: 'inherit'
-                                }}
-                            />
+                            {!endOfDayTriggered && (
+                                <textarea
+                                    placeholder="Rejection reason (if rejecting)"
+                                    value={rejectionReason}
+                                    onChange={(e) => setRejectionReason(e.target.value)}
+                                    style={{
+                                        width: '100%',
+                                        padding: '12px',
+                                        fontSize: '16px',
+                                        border: `2px solid #ddd`,
+                                        borderRadius: '8px',
+                                        marginBottom: '20px',
+                                        minHeight: '80px',
+                                        fontFamily: 'inherit'
+                                    }}
+                                />
+                            )}
 
                             <button
                                 onClick={supervisorApprove}
@@ -697,23 +756,25 @@
                                 ✓ APPROVE
                             </button>
 
-                            <button
-                                onClick={supervisorReject}
-                                disabled={!supervisorPin || !rejectionReason || loading}
-                                style={{
-                                    width: '100%',
-                                    padding: '14px',
-                                    background: HILLTOP_COLORS.red,
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    fontSize: '16px',
-                                    fontWeight: 'bold',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                ✗ REJECT
-                            </button>
+                            {!endOfDayTriggered && (
+                                <button
+                                    onClick={supervisorReject}
+                                    disabled={!supervisorPin || !rejectionReason || loading}
+                                    style={{
+                                        width: '100%',
+                                        padding: '14px',
+                                        background: HILLTOP_COLORS.red,
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '8px',
+                                        fontSize: '16px',
+                                        fontWeight: 'bold',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    ✗ REJECT
+                                </button>
+                            )}
                         </div>
                     </div>
                 );
