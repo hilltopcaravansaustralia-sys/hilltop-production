@@ -120,8 +120,6 @@
             const [previews, setPreviews] = useState({});       // angle -> objectURL
             const [uploadingAngle, setUploadingAngle] = useState(null);
             const [supPin, setSupPin] = useState('');
-            const fileRef = useRef(null);
-            const pendingAngle = useRef(null);
             const tick = useRef(null);
 
             // ---- active timer (excludes pause) ----
@@ -275,11 +273,8 @@
             // ---- End of day: real photos ----
             const finishDay = () => { setPhotos({}); setPreviews({}); setScreen('photos'); };
 
-            const pickPhoto = (angle) => { pendingAngle.current = angle; if (fileRef.current) { fileRef.current.value = ''; fileRef.current.click(); } };
-
-            const handleFile = async (e) => {
+            const handleFile = async (e, angle) => {
                 const file = e.target.files && e.target.files[0];
-                const angle = pendingAngle.current;
                 if (!file || !angle) return;
                 setUploadingAngle(angle);
                 setPreviews(prev => ({ ...prev, [angle]: URL.createObjectURL(file) }));
@@ -298,6 +293,7 @@
                     setPreviews(prev => { const n = { ...prev }; delete n[angle]; return n; });
                 }
                 setUploadingAngle(null);
+                if (e.target) e.target.value = '';
             };
 
             const photoCount = Object.keys(photos).length;
@@ -529,16 +525,15 @@
                 return (
                     <div style={{ minHeight: '100vh' }}>
                         <TopBar worker={worker} onLogout={logout} sub="End of day" />
-                        <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handleFile} style={{ display: 'none' }} />
                         <div className="fu" style={{ maxWidth: 560, margin: '0 auto', padding: 20 }}>
                             <div className="cond" style={{ fontSize: 26, fontWeight: 700, textTransform: 'uppercase' }}>Capture your work</div>
-                            <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 20 }}>Take 4 photos of the chassis. {photoCount} of 4 done.</div>
+                            <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 20 }}>Tap a tile to open the camera. {photoCount} of 4 done.</div>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 18 }}>
                                 {angles.map((a, idx) => {
                                     const taken = !!photos[a]; const busy = uploadingAngle === a; const prev = previews[a];
                                     return (
-                                        <div key={a} onClick={() => !busy && pickPhoto(a)} className="tap" style={{ position: 'relative', borderRadius: 14, border: `2px solid ${taken ? 'var(--green)' : 'var(--line)'}`, background: taken ? 'var(--green-bg)' : 'var(--card)', cursor: 'pointer', overflow: 'hidden', minHeight: 130 }}>
-                                            {prev && <img src={prev} alt={a} style={{ width: '100%', height: 130, objectFit: 'cover' }} />}
+                                        <div key={a} className="tap" style={{ position: 'relative', borderRadius: 14, border: `2px solid ${taken ? 'var(--green)' : 'var(--line)'}`, background: taken ? 'var(--green-bg)' : 'var(--card)', overflow: 'hidden', minHeight: 130 }}>
+                                            {prev && <img src={prev} alt={a} style={{ width: '100%', height: 130, objectFit: 'cover', display: 'block' }} />}
                                             {!prev && (
                                                 <div style={{ padding: '34px 12px', textAlign: 'center' }}>
                                                     <div className="cond" style={{ fontSize: 20, fontWeight: 700 }}>{idx + 1} of 4</div>
@@ -547,7 +542,11 @@
                                                 </div>
                                             )}
                                             {taken && <div style={{ position: 'absolute', top: 8, right: 8, background: 'var(--green)', color: '#fff', borderRadius: 20, fontSize: 12, fontWeight: 700, padding: '3px 10px' }}>✓ {a}</div>}
-                                            {busy && <div style={{ position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: 'var(--ink)' }}>Uploading…</div>}
+                                            {busy && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: 'var(--ink)' }}>Uploading…</div>}
+                                            {!busy && (
+                                                <input type="file" accept="image/*" capture="environment" onChange={(e) => handleFile(e, a)}
+                                                    style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', fontSize: 0 }} />
+                                            )}
                                         </div>
                                     );
                                 })}
