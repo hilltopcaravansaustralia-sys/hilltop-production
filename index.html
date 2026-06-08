@@ -21,13 +21,22 @@
         #root {
             min-height: 100vh;
         }
+        video {
+            width: 100%;
+            max-width: 600px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        canvas {
+            display: none;
+        }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
         const { createClient } = window.supabase;
 
         // Supabase setup
@@ -52,6 +61,9 @@
             const [supervisorPin, setSupervisorPin] = useState('');
             const [rejectionReason, setRejectionReason] = useState('');
             const [completedTasks, setCompletedTasks] = useState([]);
+            const [photos, setPhotos] = useState([]);
+            const videoRef = useRef(null);
+            const canvasRef = useRef(null);
 
             const HILLTOP_COLORS = {
                 orange: '#F5A623',
@@ -71,6 +83,8 @@
                 'Helping another worker', 'Other'
             ];
 
+            const PHOTO_ANGLES = ['Front', 'Left', 'Right', 'Back'];
+
             // Timer effect
             useEffect(() => {
                 let interval;
@@ -81,6 +95,73 @@
                 }
                 return () => clearInterval(interval);
             }, [isRunning, isPaused]);
+
+            // Start camera when photos screen loads
+            useEffect(() => {
+                if (screen === 'end-of-day-photos') {
+                    startCamera();
+                }
+                return () => {
+                    if (videoRef.current && videoRef.current.srcObject) {
+                        videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+                    }
+                };
+            }, [screen]);
+
+            const startCamera = async () => {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: 'environment' }
+                    });
+                    if (videoRef.current) {
+                        videoRef.current.srcObject = stream;
+                    }
+                } catch (err) {
+                    alert('Camera access denied. Please allow camera access in settings.');
+                }
+            };
+
+            const capturePhoto = (angle) => {
+                const video = videoRef.current;
+                const canvas = canvasRef.current;
+                if (video && canvas) {
+                    const ctx = canvas.getContext('2d');
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    ctx.drawImage(video, 0, 0);
+                    const photoData = canvas.toDataURL('image/jpeg');
+                    setPhotos([...photos, { angle, data: photoData }]);
+                }
+            };
+
+            const uploadPhotos = async () => {
+                if (photos.length < 4) {
+                    alert('Please take all 4 photos');
+                    return;
+                }
+                setLoading(true);
+                try {
+                    // Upload each photo to Supabase storage
+                    for (let i = 0; i < photos.length; i++) {
+                        const photo = photos[i];
+                        const fileName = `${worker.id}_${new Date().getTime()}_${photo.angle}.jpg`;
+                        const base64data = photo.data.split(',')[1];
+                        
+                        await supabase.storage
+                            .from('worker-photos')
+                            .upload(fileName, Buffer.from(base64data, 'base64'), {
+                                contentType: 'image/jpeg'
+                            });
+                    }
+
+                    alert('Photos uploaded successfully!');
+                    setPhotos([]);
+                    setScreen('task-list');
+                } catch (err) {
+                    alert('Error uploading photos: ' + err.message);
+                }
+                setLoading(false);
+            };
 
             const handleLogin = async () => {
                 setLoading(true);
@@ -117,7 +198,8 @@
                     const { data: tasksData } = await supabase
                         .from('tasks_template')
                         .select('*')
-                        .eq('department', worker.department);
+                        .eq('department', worker.department)
+                        .order('sequence_order', { ascending: true });
                     
                     setTasks(tasksData || []);
                     setScreen('task-list');
@@ -170,12 +252,21 @@
                     }]);
 
                     setCompletedTasks([...completedTasks, activeTask.task_name]);
+                    
+                    // Check if this is the last task (Clean workplace and bins)
+                    const isLastTask = activeTask.task_name && activeTask.task_name.toLowerCase().includes('clean workplace');
+                    
                     setActiveTask(null);
                     setTimer(0);
                     setIsRunning(false);
                     setIsPaused(false);
                     setPauseReason(null);
-                    setScreen('task-list');
+                    
+                    if (isLastTask) {
+                        setScreen('end-of-day-photos');
+                    } else {
+                        setScreen('task-list');
+                    }
                 } catch (err) {
                     alert('Error saving task');
                 }
@@ -188,6 +279,7 @@
                 setPinInput('');
                 setTasks([]);
                 setCompletedTasks([]);
+                setPhotos([]);
             };
 
             // LOGIN SCREEN
@@ -247,9 +339,6 @@
                             >
                                 {loading ? 'Loading...' : 'Login'}
                             </button>
-                            <p style={{ fontSize: '12px', color: '#999', marginTop: '20px', textAlign: 'center' }}>
-                                Test PINs: 1001, 1002, 2001, 7777
-                            </p>
                         </div>
                     </div>
                 );
@@ -265,22 +354,12 @@
                                 <p style={{ color: '#666', marginBottom: '30px' }}>Daily safety acknowledgement</p>
                                 
                                 <label style={{ display: 'flex', alignItems: 'center', marginBottom: '20px', cursor: 'pointer' }}>
-                                    <input
-                                        type="checkbox"
-                                        checked={signoffPPE}
-                                        onChange={(e) => setSignoffPPE(e.target.checked)}
-                                        style={{ marginRight: '10px', width: '18px', height: '18px' }}
-                                    />
+                                    <input type="checkbox" checked={signoffPPE} onChange={(e) => setSignoffPPE(e.target.checked)} style={{ marginRight: '10px', width: '18px', height: '18px' }} />
                                     <span style={{ fontSize: '16px' }}>✅ I have PPE and it fits correctly</span>
                                 </label>
                                 
                                 <label style={{ display: 'flex', alignItems: 'center', marginBottom: '30px', cursor: 'pointer' }}>
-                                    <input
-                                        type="checkbox"
-                                        checked={signoffPolicy}
-                                        onChange={(e) => setSignoffPolicy(e.target.checked)}
-                                        style={{ marginRight: '10px', width: '18px', height: '18px' }}
-                                    />
+                                    <input type="checkbox" checked={signoffPolicy} onChange={(e) => setSignoffPolicy(e.target.checked)} style={{ marginRight: '10px', width: '18px', height: '18px' }} />
                                     <span style={{ fontSize: '16px' }}>✅ I agree to Hilltop WHS policy</span>
                                 </label>
 
@@ -314,36 +393,13 @@
                         <div style={{ maxWidth: '600px', margin: '0 auto' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                                 <h2 style={{ color: HILLTOP_COLORS.charcoal }}>Tasks for Today</h2>
-                                <button
-                                    onClick={logout}
-                                    style={{
-                                        padding: '8px 16px',
-                                        background: HILLTOP_COLORS.red,
-                                        color: 'white',
-                                        border: 'none',
-                                        borderRadius: '6px',
-                                        cursor: 'pointer',
-                                        fontSize: '14px'
-                                    }}
-                                >
+                                <button onClick={logout} style={{ padding: '8px 16px', background: HILLTOP_COLORS.red, color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '14px' }}>
                                     Logout
                                 </button>
                             </div>
                             
                             {tasks.map((task, idx) => (
-                                <div
-                                    key={idx}
-                                    onClick={() => selectTask(task)}
-                                    style={{
-                                        background: 'white',
-                                        padding: '16px',
-                                        marginBottom: '12px',
-                                        borderRadius: '8px',
-                                        border: `2px solid ${HILLTOP_COLORS.orange}`,
-                                        cursor: 'pointer',
-                                        transition: 'all 0.2s'
-                                    }}
-                                >
+                                <div key={idx} onClick={() => selectTask(task)} style={{ background: 'white', padding: '16px', marginBottom: '12px', borderRadius: '8px', border: `2px solid ${HILLTOP_COLORS.orange}`, cursor: 'pointer' }}>
                                     <h3 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '8px' }}>{task.task_name}</h3>
                                     <p style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>{task.station || 'Station'}</p>
                                     <p style={{ color: HILLTOP_COLORS.orange, fontWeight: 'bold' }}>⏱️ {task.allocated_minutes} min</p>
@@ -353,11 +409,7 @@
                             {completedTasks.length > 0 && (
                                 <div style={{ marginTop: '30px', padding: '20px', background: HILLTOP_COLORS.green, borderRadius: '8px', color: 'white' }}>
                                     <h3 style={{ marginBottom: '10px' }}>✓ Completed Today:</h3>
-                                    <ul style={{ listStyle: 'none' }}>
-                                        {completedTasks.map((task, idx) => (
-                                            <li key={idx} style={{ paddingBottom: '8px' }}>✓ {task}</li>
-                                        ))}
-                                    </ul>
+                                    {completedTasks.map((task, idx) => (<div key={idx}>✓ {task}</div>))}
                                 </div>
                             )}
                         </div>
@@ -388,113 +440,35 @@
                         <div style={{ maxWidth: '600px', margin: '0 auto' }}>
                             <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>{activeTask?.task_name}</h2>
                             
-                            <div style={{
-                                background: getTimerColor(),
-                                color: 'white',
-                                padding: '40px',
-                                borderRadius: '12px',
-                                textAlign: 'center',
-                                marginBottom: '20px'
-                            }}>
-                                <div style={{ fontSize: '48px', fontWeight: 'bold', marginBottom: '10px' }}>
-                                    {formatTime(timer)}
-                                </div>
+                            <div style={{ background: getTimerColor(), color: 'white', padding: '40px', borderRadius: '12px', textAlign: 'center', marginBottom: '20px' }}>
+                                <div style={{ fontSize: '48px', fontWeight: 'bold', marginBottom: '10px' }}>{formatTime(timer)}</div>
                                 <div style={{ fontSize: '16px' }}>Allocated: {activeTask?.allocated_minutes} min</div>
                                 {isPaused && <div style={{ fontSize: '14px', marginTop: '10px' }}>⏸️ PAUSED: {pauseReason}</div>}
                             </div>
 
                             {!isRunning && (
-                                <button
-                                    onClick={handleStart}
-                                    style={{
-                                        width: '100%',
-                                        padding: '14px',
-                                        background: HILLTOP_COLORS.green,
-                                        color: 'white',
-                                        border: 'none',
-                                        borderRadius: '8px',
-                                        fontSize: '16px',
-                                        fontWeight: 'bold',
-                                        marginBottom: '12px',
-                                        cursor: 'pointer'
-                                    }}
-                                >
+                                <button onClick={handleStart} style={{ width: '100%', padding: '14px', background: HILLTOP_COLORS.green, color: 'white', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', marginBottom: '12px', cursor: 'pointer' }}>
                                     ▶️ START TASK
                                 </button>
                             )}
 
                             {isRunning && !isPaused && (
-                                <button
-                                    onClick={handlePause}
-                                    style={{
-                                        width: '100%',
-                                        padding: '14px',
-                                        background: HILLTOP_COLORS.red,
-                                        color: 'white',
-                                        border: 'none',
-                                        borderRadius: '8px',
-                                        fontSize: '16px',
-                                        fontWeight: 'bold',
-                                        marginBottom: '12px',
-                                        cursor: 'pointer'
-                                    }}
-                                >
+                                <button onClick={handlePause} style={{ width: '100%', padding: '14px', background: HILLTOP_COLORS.red, color: 'white', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', marginBottom: '12px', cursor: 'pointer' }}>
                                     ⏸️ PAUSE
                                 </button>
                             )}
 
                             {isPaused && (
-                                <button
-                                    onClick={handleResume}
-                                    style={{
-                                        width: '100%',
-                                        padding: '14px',
-                                        background: HILLTOP_COLORS.green,
-                                        color: 'white',
-                                        border: 'none',
-                                        borderRadius: '8px',
-                                        fontSize: '16px',
-                                        fontWeight: 'bold',
-                                        marginBottom: '12px',
-                                        cursor: 'pointer'
-                                    }}
-                                >
+                                <button onClick={handleResume} style={{ width: '100%', padding: '14px', background: HILLTOP_COLORS.green, color: 'white', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', marginBottom: '12px', cursor: 'pointer' }}>
                                     ▶️ RESUME
                                 </button>
                             )}
 
-                            <button
-                                onClick={finishTask}
-                                disabled={!isRunning || isPaused}
-                                style={{
-                                    width: '100%',
-                                    padding: '14px',
-                                    background: (isRunning && !isPaused) ? HILLTOP_COLORS.orange : '#ccc',
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    fontSize: '16px',
-                                    fontWeight: 'bold',
-                                    cursor: (isRunning && !isPaused) ? 'pointer' : 'not-allowed'
-                                }}
-                            >
+                            <button onClick={finishTask} disabled={!isRunning || isPaused} style={{ width: '100%', padding: '14px', background: (isRunning && !isPaused) ? HILLTOP_COLORS.orange : '#ccc', color: 'white', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: (isRunning && !isPaused) ? 'pointer' : 'not-allowed' }}>
                                 ✓ FINISH TASK
                             </button>
 
-                            <button
-                                onClick={() => setScreen('task-list')}
-                                style={{
-                                    width: '100%',
-                                    padding: '10px',
-                                    background: '#999',
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    marginTop: '12px',
-                                    cursor: 'pointer',
-                                    fontSize: '14px'
-                                }}
-                            >
+                            <button onClick={() => setScreen('task-list')} style={{ width: '100%', padding: '10px', background: '#999', color: 'white', border: 'none', borderRadius: '8px', marginTop: '12px', cursor: 'pointer', fontSize: '14px' }}>
                                 ← Back to Tasks
                             </button>
                         </div>
@@ -508,28 +482,67 @@
                     <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
                         <div style={{ maxWidth: '600px', margin: '0 auto' }}>
                             <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>Why are you pausing?</h2>
-                            
                             {PAUSE_REASONS.map((reason, idx) => (
-                                <button
-                                    key={idx}
-                                    onClick={() => confirmPause(reason)}
-                                    style={{
-                                        width: '100%',
-                                        padding: '14px',
-                                        background: 'white',
-                                        color: HILLTOP_COLORS.charcoal,
-                                        border: `2px solid ${HILLTOP_COLORS.orange}`,
-                                        borderRadius: '8px',
-                                        marginBottom: '10px',
-                                        fontSize: '16px',
-                                        fontWeight: 'bold',
-                                        cursor: 'pointer',
-                                        textAlign: 'left'
-                                    }}
-                                >
+                                <button key={idx} onClick={() => confirmPause(reason)} style={{ width: '100%', padding: '14px', background: 'white', color: HILLTOP_COLORS.charcoal, border: `2px solid ${HILLTOP_COLORS.orange}`, borderRadius: '8px', marginBottom: '10px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer', textAlign: 'left' }}>
                                     {reason}
                                 </button>
                             ))}
+                        </div>
+                    </div>
+                );
+            }
+
+            // END OF DAY PHOTOS
+            if (screen === 'end-of-day-photos') {
+                return (
+                    <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
+                        <div style={{ maxWidth: '600px', margin: '0 auto' }}>
+                            <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>📷 Workstation Photos</h2>
+                            <p style={{ color: '#666', marginBottom: '20px' }}>Take photos of the cleaned workstations</p>
+                            
+                            <video ref={videoRef} autoPlay playsInline style={{ width: '100%', borderRadius: '8px', marginBottom: '20px', background: '#000' }} />
+                            <canvas ref={canvasRef} style={{ display: 'none' }} />
+
+                            <div style={{ marginBottom: '20px' }}>
+                                {PHOTO_ANGLES.map((angle, idx) => (
+                                    <button
+                                        key={idx}
+                                        onClick={() => capturePhoto(angle)}
+                                        style={{
+                                            width: '100%',
+                                            padding: '14px',
+                                            background: photos.find(p => p.angle === angle) ? HILLTOP_COLORS.green : HILLTOP_COLORS.orange,
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '8px',
+                                            marginBottom: '10px',
+                                            fontSize: '16px',
+                                            fontWeight: 'bold',
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        {photos.find(p => p.angle === angle) ? '✓' : '📷'} Photo: {angle}
+                                    </button>
+                                ))}
+                            </div>
+
+                            <button
+                                onClick={uploadPhotos}
+                                disabled={photos.length < 4 || loading}
+                                style={{
+                                    width: '100%',
+                                    padding: '14px',
+                                    background: photos.length === 4 ? HILLTOP_COLORS.orange : '#ccc',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    fontSize: '16px',
+                                    fontWeight: 'bold',
+                                    cursor: photos.length === 4 ? 'pointer' : 'not-allowed'
+                                }}
+                            >
+                                {loading ? 'Uploading...' : `Submit Photos (${photos.length}/4)`}
+                            </button>
                         </div>
                     </div>
                 );
