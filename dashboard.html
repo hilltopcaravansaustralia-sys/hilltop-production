@@ -16,7 +16,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root{
-            --ink:#15181E; --ink-2:#1F242D; --panel:#252B35; --line:#333A45;
+            --ink:#15181E; --panel:#252B35; --panel-2:#1E232C; --line:#333A45;
             --muted:#9AA3B2; --orange:#F5A623; --green:#22C55E; --amber:#F59E0B;
             --red:#EF4444; --slate:#64748B; --white:#F4F6F9;
         }
@@ -29,22 +29,22 @@
         .slide{animation:fade .5s ease both;}
         @keyframes grow{from{width:0;}to{width:100%;}}
         ::-webkit-scrollbar{display:none;}
-        img{ -webkit-user-drag:none; user-select:none; }
+        img{-webkit-user-drag:none;user-select:none;}
     </style>
 </head>
 <body>
     <div id="root"></div>
     <script type="text/babel">
-        const { useState, useEffect, useRef, memo } = React;
+        const { useState, useEffect, memo } = React;
         const { createClient } = window.supabase;
         const supabase = createClient(
             'https://pycdvyaxldjfibncnvsg.supabase.co',
             'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5Y2R2eWF4bGRqZmlibmNudnNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MjY4NzcsImV4cCI6MjA5NjQwMjg3N30.RkI9yVJCMirdXUenl_fGUI5WiQr8n9TyToadiRCwkmI'
         );
 
-        const SLIDE_MS = 120000;
+        const SLIDE_MS = 60000;   // 1 min per slide
         const REFRESH_MS = 30000;
-        const LINE_TARGET = { 1:'4', 2:'5', 3:'2–3' };
+        const LINE_TARGET = { 1:4, 2:5, 3:3 };
         const STAGES = [
             { key:'Wiring', dept:'Flooring', station:'Wiring' },
             { key:'Floor', dept:'Flooring', station:'Floor' },
@@ -52,200 +52,214 @@
             { key:'Building', dept:'Building', station:null }
         ];
         const todayStr = () => new Date().toISOString().split('T')[0];
-        const fmtDate = (s) => s ? new Date(s).toLocaleDateString('en-AU',{day:'numeric',month:'short'}) : '—';
-        const hhmm = (min) => { const h=Math.floor(min/60), m=Math.round(min%60); return h>0?`${h}h ${m}m`:`${m}m`; };
+        const fmtDate = (s)=> s? new Date(s).toLocaleDateString('en-AU',{day:'numeric',month:'short'}) : '—';
+        const hhmm = (m)=>{ const h=Math.floor(m/60), mm=Math.round(m%60); return h>0?`${h}h ${mm}m`:`${mm}m`; };
+        const since = (iso)=>{ const mins=Math.floor((Date.now()-new Date(iso).getTime())/60000); if(mins<60) return `${mins} min ago`; const h=Math.floor(mins/60); return `${h}h ${mins%60}m ago`; };
+        const daysBetween = (a,b)=> Math.round((new Date(b).getTime()-new Date(a).getTime())/86400000);
 
-        // ---- isolated clock: only this re-renders each second ----
         const Clock = memo(function Clock(){
             const [now,setNow]=useState(new Date());
             useEffect(()=>{ const t=setInterval(()=>setNow(new Date()),1000); return ()=>clearInterval(t); },[]);
-            return (
-                <div style={{textAlign:'right'}}>
-                    <div className="cond num" style={{fontSize:34,fontWeight:700,lineHeight:1}}>{now.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'})}</div>
-                    <div style={{color:'var(--muted)',fontSize:14}}>{now.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'})}</div>
-                </div>
-            );
+            return (<div style={{textAlign:'right'}}>
+                <div className="cond num" style={{fontSize:32,fontWeight:700,lineHeight:1}}>{now.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'})}</div>
+                <div style={{color:'var(--muted)',fontSize:14}}>{now.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'})}</div>
+            </div>);
         });
-
-        const Bar = memo(function Bar({pct,h=14}){
-            return (
-                <div style={{height:h,background:'#1A1F27',borderRadius:h,overflow:'hidden',width:'100%'}}>
-                    <div style={{height:'100%',width:pct+'%',background:pct>=100?'var(--green)':'var(--orange)',borderRadius:h,transition:'width .6s ease'}}/>
-                </div>
-            );
+        const Bar = memo(function Bar({pct,h=12,color}){
+            return (<div style={{height:h,background:'#161A21',borderRadius:h,overflow:'hidden',width:'100%'}}>
+                <div style={{height:'100%',width:Math.min(100,pct)+'%',background:color||(pct>=100?'var(--green)':'var(--orange)'),borderRadius:h,transition:'width .6s ease'}}/>
+            </div>);
         });
-
         const Header = memo(function Header({title,sub}){
-            return (
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'22px 40px',borderBottom:'1px solid var(--line)'}}>
-                    <div style={{display:'flex',alignItems:'center',gap:18}}>
-                        <img src="logo.png" alt="Hilltop" style={{height:46}}/>
-                        <div style={{borderLeft:'1px solid var(--line)',paddingLeft:18}}>
-                            <div className="cond" style={{fontSize:30,fontWeight:700,textTransform:'uppercase',lineHeight:1}}>{title}</div>
-                            <div style={{color:'var(--muted)',fontSize:15,marginTop:3}}>{sub}</div>
-                        </div>
+            return (<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'18px 36px',borderBottom:'1px solid var(--line)'}}>
+                <div style={{display:'flex',alignItems:'center',gap:16}}>
+                    <img src="logo.png" alt="Hilltop" style={{height:42}}/>
+                    <div style={{borderLeft:'1px solid var(--line)',paddingLeft:16}}>
+                        <div className="cond" style={{fontSize:27,fontWeight:700,textTransform:'uppercase',lineHeight:1}}>{title}</div>
+                        <div style={{color:'var(--muted)',fontSize:14,marginTop:2}}>{sub}</div>
                     </div>
-                    <Clock/>
                 </div>
-            );
+                <Clock/>
+            </div>);
         });
 
-        const dueBadge = (van) => {
+        const Stat = memo(function Stat({label,value,sub,color}){
+            return (<div style={{background:'var(--panel)',border:'1px solid var(--line)',borderRadius:14,padding:'16px 20px',flex:1}}>
+                <div style={{color:'var(--muted)',fontSize:14,textTransform:'uppercase',letterSpacing:'.04em'}}>{label}</div>
+                <div className="cond num" style={{fontSize:48,fontWeight:700,lineHeight:1.05,color:color||'var(--white)'}}>{value}</div>
+                {sub && <div style={{color:'var(--muted)',fontSize:13}}>{sub}</div>}
+            </div>);
+        });
+
+        const dueBadge = (van)=>{
             if(!van.target_completion_date) return null;
-            const days=Math.ceil((new Date(van.target_completion_date).getTime()-new Date(todayStr()).getTime())/86400000);
-            if(days<0) return {t:'OVERDUE',c:'var(--red)'};
-            if(days===0) return {t:'DUE TODAY',c:'var(--red)'};
-            if(days===1) return {t:'DUE TOMORROW',c:'var(--amber)'};
+            const d=daysBetween(todayStr(), van.target_completion_date);
+            if(d<0) return {t:'OVERDUE',c:'var(--red)'};
+            if(d===0) return {t:'DUE TODAY',c:'var(--red)'};
+            if(d===1) return {t:'DUE TOMORROW',c:'var(--amber)'};
             return {t:`DUE ${fmtDate(van.target_completion_date).toUpperCase()}`,c:'var(--slate)'};
         };
+        const vanStatus = (van, pct)=>{
+            const d = van.target_completion_date? daysBetween(todayStr(), van.target_completion_date) : 99;
+            if(d<0 && pct<100) return {t:'OVERDUE', c:'var(--red)'};
+            if(d<=0 && pct<100) return {t:'AT RISK', c:'var(--amber)'};
+            if(d===1 && pct<60) return {t:'AT RISK', c:'var(--amber)'};
+            return {t:'ON TRACK', c:'var(--green)'};
+        };
 
-        // ---- Overview slide (pure, props only) ----
-        const Overview = memo(function Overview({lines}){
-            return (
-                <div className="slide" style={{height:'100%',display:'flex',flexDirection:'column'}}>
-                    <Header title="Production Floor" sub="Flooring & Building — live status"/>
-                    <div style={{flex:1,display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:24,padding:'28px 40px'}}>
-                        {[1,2,3].map(L=>{
-                            const d=lines[L];
-                            return (
-                                <div key={L} style={{background:'var(--panel)',borderRadius:18,padding:28,display:'flex',flexDirection:'column',border:'1px solid var(--line)'}}>
-                                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline'}}>
-                                        <div className="cond" style={{fontSize:46,fontWeight:700,textTransform:'uppercase',lineHeight:1}}>Line {L}</div>
-                                        <div style={{color:'var(--muted)',fontSize:18}}>Target {LINE_TARGET[L]}/wk</div>
-                                    </div>
-                                    <div style={{color:'var(--muted)',fontSize:17,marginTop:6,marginBottom:22}}>{d.count} van{d.count!==1?'s':''} in build</div>
-                                    {d.van ? (
-                                        <div style={{marginTop:'auto'}}>
-                                            <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:6}}>
-                                                <span className="cond" style={{fontSize:40,fontWeight:700}}>{d.van.chassis_number}</span>
-                                                {d.badge && <span style={{fontSize:13,fontWeight:700,background:d.badge.c,color:'#fff',borderRadius:20,padding:'3px 12px'}}>{d.badge.t}</span>}
-                                            </div>
-                                            <div style={{color:'var(--muted)',fontSize:18,marginBottom:16}}>{d.van.model} · {d.stage}</div>
-                                            <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',marginBottom:8}}>
-                                                <span className="cond num" style={{fontSize:64,fontWeight:700,color:d.pct>=100?'var(--green)':'var(--orange)',lineHeight:1}}>{d.pct}%</span>
-                                                <span style={{color:'var(--muted)',fontSize:17}}>{hhmm(d.remain)} left</span>
-                                            </div>
-                                            <Bar pct={d.pct}/>
-                                        </div>
-                                    ) : (<div style={{marginTop:'auto',color:'var(--muted)',fontSize:20}}>No van in build</div>)}
+        // ---------- EXEC OVERVIEW ----------
+        const Exec = memo(function Exec({kpis, lines, blockers}){
+            return (<div className="slide" style={{height:'100%',display:'flex',flexDirection:'column'}}>
+                <Header title="Weekly Production Status" sub="Flooring & Building — live"/>
+                <div style={{display:'flex',gap:14,padding:'18px 36px 6px'}}>
+                    <Stat label="In Build" value={kpis.inProgress} sub={`target ~${kpis.target}/wk`}/>
+                    <Stat label="Late" value={kpis.late} color={kpis.late>0?'var(--red)':'var(--green)'} sub="past due & unfinished"/>
+                    <Stat label="Blocked" value={kpis.blocked} color={kpis.blocked>0?'var(--red)':'var(--green)'} sub="waiting on an issue"/>
+                    <Stat label="On Track" value={kpis.onTrack} color="var(--green)" sub="vs due date"/>
+                    <Stat label="Working" value={kpis.active} color="var(--orange)" sub={`of ${kpis.signedOn} signed on`}/>
+                </div>
+                <div style={{flex:1,display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:18,padding:'12px 36px 18px'}}>
+                    {[1,2,3].map(L=>{
+                        const d=lines[L];
+                        const card = d.van ? d.status.c : 'var(--line)';
+                        return (
+                            <div key={L} style={{background:'var(--panel)',borderRadius:16,padding:22,display:'flex',flexDirection:'column',border:`2px solid ${card}`}}>
+                                <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline'}}>
+                                    <div className="cond" style={{fontSize:38,fontWeight:700,textTransform:'uppercase',lineHeight:1}}>Line {L}</div>
+                                    <div style={{color:'var(--muted)',fontSize:16}}>{d.count} in build · target {LINE_TARGET[L]}</div>
                                 </div>
-                            );
+                                {d.van ? (<div style={{marginTop:14,display:'flex',flexDirection:'column',flex:1}}>
+                                    <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:2}}>
+                                        <span className="cond" style={{fontSize:38,fontWeight:700}}>{d.van.chassis_number}</span>
+                                        {d.badge && <span style={{fontSize:12,fontWeight:700,background:d.badge.c,color:'#fff',borderRadius:18,padding:'2px 10px'}}>{d.badge.t}</span>}
+                                    </div>
+                                    <div style={{color:'var(--muted)',fontSize:16}}>{d.van.model} · {d.stage}</div>
+                                    <div style={{display:'flex',gap:20,margin:'12px 0',fontSize:14}}>
+                                        <div><div style={{color:'var(--muted)'}}>Day in prod.</div><div className="num" style={{fontSize:22,fontWeight:700}}>{d.daysIn}</div></div>
+                                        <div><div style={{color:'var(--muted)'}}>On van now</div><div style={{fontSize:18,fontWeight:600}}>{d.worker||'—'}</div></div>
+                                        <div><div style={{color:'var(--muted)'}}>Next dept</div><div style={{fontSize:18,fontWeight:600}}>{d.nextDept}</div></div>
+                                    </div>
+                                    <div style={{marginTop:'auto'}}>
+                                        <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',marginBottom:6}}>
+                                            <span className="cond num" style={{fontSize:46,fontWeight:700,color:d.pct>=100?'var(--green)':'var(--orange)',lineHeight:1}}>{d.pct}%</span>
+                                            <span style={{fontSize:14,fontWeight:700,color:d.status.c,textTransform:'uppercase'}}>{d.status.t}</span>
+                                        </div>
+                                        <Bar pct={d.pct} color={d.status.c==='var(--red)'?'var(--red)':undefined}/>
+                                    </div>
+                                </div>) : (<div style={{marginTop:'auto',color:'var(--muted)',fontSize:18}}>No van in build</div>)}
+                            </div>
+                        );
+                    })}
+                </div>
+                {blockers.length>0 ? (
+                    <div style={{background:'rgba(239,68,68,.12)',borderTop:'2px solid var(--red)',padding:'12px 36px',display:'flex',alignItems:'center',gap:18,flexWrap:'wrap'}}>
+                        <span className="cond" style={{fontSize:22,fontWeight:700,color:'var(--red)',textTransform:'uppercase'}}>⚠ {blockers.length} Blocker{blockers.length>1?'s':''}</span>
+                        {blockers.slice(0,4).map((b,i)=>(<span key={i} style={{fontSize:16}}><b className="cond">{b.chassis}</b> <span style={{color:'var(--muted)'}}>— {b.reason} ({b.ago})</span></span>))}
+                    </div>
+                ) : (<div style={{background:'rgba(34,197,94,.10)',borderTop:'2px solid var(--green)',padding:'11px 36px',fontSize:16,color:'var(--green)',fontWeight:600}}>No active blockers — floor running clean</div>)}
+            </div>);
+        });
+
+        // ---------- OPS: departments + workforce + deliveries ----------
+        const Ops = memo(function Ops({depts, workforce, performers, deliveries, blockers}){
+            return (<div className="slide" style={{height:'100%',display:'flex',flexDirection:'column'}}>
+                <Header title="Departments & Workforce" sub="Today — live efficiency and staffing"/>
+                <div style={{flex:1,display:'grid',gridTemplateColumns:'1.2fr 1fr 1fr',gap:18,padding:'20px 36px'}}>
+                    {/* departments */}
+                    <div style={{display:'flex',flexDirection:'column',gap:16}}>
+                        <div className="cond" style={{fontSize:22,fontWeight:700,textTransform:'uppercase',color:'var(--muted)'}}>Department status</div>
+                        {depts.map(d=>{
+                            const effColor = d.eff==null?'var(--muted)':d.eff>=100?'var(--green)':d.eff>=75?'var(--amber)':'var(--red)';
+                            return (<div key={d.name} style={{background:'var(--panel)',border:'1px solid var(--line)',borderRadius:14,padding:18}}>
+                                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                                    <span className="cond" style={{fontSize:28,fontWeight:700,textTransform:'uppercase'}}>{d.name}</span>
+                                    <span className="cond num" style={{fontSize:30,fontWeight:700,color:effColor}}>{d.eff==null?'—':d.eff+'%'}</span>
+                                </div>
+                                <div style={{display:'flex',gap:22,marginTop:8,fontSize:15,color:'var(--muted)'}}>
+                                    <span>Done today <b style={{color:'var(--white)'}}>{d.done}</b></span>
+                                    <span>Active now <b style={{color:'var(--white)'}}>{d.activeTasks}</b></span>
+                                    <span>Staff <b style={{color:'var(--white)'}}>{d.activeWorkers}/{d.totalWorkers}</b></span>
+                                </div>
+                            </div>);
                         })}
+                        <div style={{color:'var(--muted)',fontSize:12,fontStyle:'italic'}}>Efficiency = allocated ÷ actual time on completed tasks today. Over 100% = ahead of standard.</div>
                     </div>
-                    {/* blockers */}
-                </div>
-            );
-        });
-
-        const BlockerBar = memo(function BlockerBar({blockers}){
-            if(blockers.length>0) return (
-                <div style={{background:'rgba(239,68,68,.12)',borderTop:'2px solid var(--red)',padding:'16px 40px',display:'flex',alignItems:'center',gap:18,flexWrap:'wrap'}}>
-                    <span className="cond" style={{fontSize:24,fontWeight:700,color:'var(--red)',textTransform:'uppercase'}}>⚠ {blockers.length} Blocker{blockers.length>1?'s':''}</span>
-                    {blockers.slice(0,4).map((b,i)=>(<span key={i} style={{fontSize:18}}><b className="cond">{b.chassis}</b> <span style={{color:'var(--muted)'}}>— {b.reason}</span></span>))}
-                </div>
-            );
-            return (<div style={{background:'rgba(34,197,94,.10)',borderTop:'2px solid var(--green)',padding:'14px 40px',fontSize:18,color:'var(--green)',fontWeight:600}}>No active blockers — floor running clean</div>);
-        });
-
-        const VanSlide = memo(function VanSlide({line,van,overall,stages,active,blockers}){
-            const badge=dueBadge(van);
-            return (
-                <div className="slide" style={{height:'100%',display:'flex',flexDirection:'column'}}>
-                    <Header title={`Line ${line} · Next out`} sub="Caravan due next from this line"/>
-                    <div style={{flex:1,padding:'30px 40px',display:'flex',flexDirection:'column'}}>
-                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:26}}>
-                            <div>
-                                <div style={{display:'flex',alignItems:'center',gap:16}}>
-                                    <span className="cond" style={{fontSize:88,fontWeight:700,lineHeight:.9}}>{van.chassis_number}</span>
-                                    {badge && <span style={{fontSize:18,fontWeight:700,background:badge.c,color:'#fff',borderRadius:24,padding:'6px 18px'}}>{badge.t}</span>}
+                    {/* workforce */}
+                    <div style={{background:'var(--panel)',border:'1px solid var(--line)',borderRadius:14,padding:20,display:'flex',flexDirection:'column'}}>
+                        <div className="cond" style={{fontSize:22,fontWeight:700,textTransform:'uppercase',color:'var(--muted)',marginBottom:14}}>Workforce</div>
+                        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+                            <div><div className="cond num" style={{fontSize:44,fontWeight:700}}>{workforce.signedOn}</div><div style={{color:'var(--muted)',fontSize:14}}>Signed on</div></div>
+                            <div><div className="cond num" style={{fontSize:44,fontWeight:700,color:'var(--green)'}}>{workforce.active}</div><div style={{color:'var(--muted)',fontSize:14}}>Active</div></div>
+                            <div><div className="cond num" style={{fontSize:44,fontWeight:700,color:'var(--amber)'}}>{workforce.paused}</div><div style={{color:'var(--muted)',fontSize:14}}>Paused</div></div>
+                            <div><div className="cond num" style={{fontSize:44,fontWeight:700,color:'var(--slate)'}}>{workforce.idle}</div><div style={{color:'var(--muted)',fontSize:14}}>Idle</div></div>
+                        </div>
+                        <div className="cond" style={{fontSize:18,fontWeight:700,textTransform:'uppercase',color:'var(--muted)',margin:'20px 0 10px'}}>Top performers today</div>
+                        {performers.length===0 && <div style={{color:'var(--muted)',fontSize:16}}>No completed work logged yet today.</div>}
+                        {performers.map((p,i)=>(
+                            <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:9}}>
+                                <span style={{fontSize:19,fontWeight:600}}><span style={{color:'var(--orange)'}}>{i+1}.</span> {p.name}</span>
+                                <span className="cond num" style={{fontSize:22,fontWeight:700,color:p.eff>=100?'var(--green)':'var(--amber)'}}>{p.eff}%</span>
+                            </div>
+                        ))}
+                    </div>
+                    {/* deliveries + issues */}
+                    <div style={{display:'flex',flexDirection:'column',gap:16}}>
+                        <div style={{background:'var(--panel)',border:'1px solid var(--line)',borderRadius:14,padding:20,flex:1}}>
+                            <div className="cond" style={{fontSize:22,fontWeight:700,textTransform:'uppercase',color:'var(--muted)',marginBottom:14}}>Upcoming deliveries</div>
+                            {deliveries.length===0 && <div style={{color:'var(--muted)',fontSize:16}}>Nothing due in the next 7 days.</div>}
+                            {deliveries.map(v=>(
+                                <div key={v.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+                                    <div><div className="cond" style={{fontSize:24,fontWeight:700}}>{v.chassis_number}</div><div style={{color:'var(--muted)',fontSize:14}}>{v.model} · Line {v.production_line}</div></div>
+                                    <div style={{textAlign:'right'}}><div style={{fontSize:17,fontWeight:700}}>{fmtDate(v.target_completion_date)}</div><div style={{color:'var(--muted)',fontSize:13}}>{v.dleft}</div></div>
                                 </div>
-                                <div style={{color:'var(--muted)',fontSize:26,marginTop:4}}>{van.model} · Line {line}</div>
-                            </div>
-                            <div style={{textAlign:'right'}}>
-                                <div className="cond num" style={{fontSize:104,fontWeight:700,color:overall.pct>=100?'var(--green)':'var(--orange)',lineHeight:.9}}>{overall.pct}%</div>
-                                <div style={{color:'var(--muted)',fontSize:22}}>{hhmm(overall.remain)} of work left</div>
-                            </div>
+                            ))}
                         </div>
-                        <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:16,marginBottom:26}}>
-                            {stages.map(p=>{
-                                const color=p.pct>=100?'var(--green)':p.pct>0?'var(--amber)':'var(--slate)';
-                                const state=p.pct>=100?'Done':p.pct>0?'In progress':'Not started';
-                                return (
-                                    <div key={p.key} style={{background:'var(--panel)',border:`1px solid ${p.pct>0?color:'var(--line)'}`,borderRadius:16,padding:'20px 22px'}}>
-                                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-                                            <span className="cond" style={{fontSize:26,fontWeight:700,textTransform:'uppercase'}}>{p.key}</span>
-                                            <span className="cond num" style={{fontSize:30,fontWeight:700,color}}>{p.pct}%</span>
-                                        </div>
-                                        <Bar pct={p.pct} h={10}/>
-                                        <div style={{color:'var(--muted)',fontSize:16,marginTop:10}}>{state} · {p.doneCount}/{p.total} tasks</div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20,flex:1}}>
-                            <div style={{background:'var(--panel)',border:'1px solid var(--line)',borderRadius:16,padding:24}}>
-                                <div className="cond" style={{fontSize:22,fontWeight:700,textTransform:'uppercase',color:'var(--muted)',marginBottom:14}}>Working now</div>
-                                {active.length===0 && <div style={{color:'var(--muted)',fontSize:20}}>No one on this van right now</div>}
-                                {active.map(a=>(
-                                    <div key={a.id} style={{display:'flex',alignItems:'center',gap:12,marginBottom:12}}>
-                                        <span style={{width:11,height:11,borderRadius:11,background:'var(--green)'}}/>
-                                        <span style={{fontSize:21,fontWeight:600}}>{a.who}</span>
-                                        <span style={{color:'var(--muted)',fontSize:19}}>— {a.task}</span>
-                                    </div>
-                                ))}
-                            </div>
-                            <div style={{background: blockers.length? 'rgba(239,68,68,.12)':'var(--panel)',border:`1px solid ${blockers.length?'var(--red)':'var(--line)'}`,borderRadius:16,padding:24}}>
-                                <div className="cond" style={{fontSize:22,fontWeight:700,textTransform:'uppercase',color:blockers.length?'var(--red)':'var(--muted)',marginBottom:14}}>Blockers</div>
-                                {blockers.length===0 && <div style={{color:'var(--muted)',fontSize:20}}>None — running clean</div>}
-                                {blockers.map(b=>(
-                                    <div key={b.id} style={{marginBottom:12}}>
-                                        <span style={{fontSize:21,fontWeight:700,color:'var(--red)'}}>{b.reason}</span>
-                                        <span style={{color:'var(--muted)',fontSize:18}}> — {b.who}</span>
-                                    </div>
-                                ))}
-                            </div>
+                        <div style={{background: blockers.length?'rgba(239,68,68,.12)':'var(--panel)',border:`1px solid ${blockers.length?'var(--red)':'var(--line)'}`,borderRadius:14,padding:20}}>
+                            <div className="cond" style={{fontSize:22,fontWeight:700,textTransform:'uppercase',color:blockers.length?'var(--red)':'var(--muted)',marginBottom:12}}>Open issues</div>
+                            {blockers.length===0 && <div style={{color:'var(--muted)',fontSize:16}}>None.</div>}
+                            {blockers.slice(0,4).map((b,i)=>(
+                                <div key={i} style={{marginBottom:10}}>
+                                    <span style={{fontSize:18,fontWeight:700}}>{b.chassis}</span>
+                                    <span style={{color:'var(--red)',fontSize:17,fontWeight:600}}> — {b.reason}</span>
+                                    <div style={{color:'var(--muted)',fontSize:14}}>{b.who} · {b.ago}</div>
+                                </div>
+                            ))}
                         </div>
                     </div>
                 </div>
-            );
+                <div style={{padding:'8px 36px 14px',color:'var(--muted)',fontSize:12,fontStyle:'italic',borderTop:'1px solid var(--line)'}}>Coming online with future systems: parts shortages (inventory), QC pass/fail, weekly forecast & on-time rate (needs final departments + completion tracking).</div>
+            </div>);
         });
 
         const Footer = memo(function Footer({count,active,slideKey}){
-            return (
-                <div style={{position:'fixed',bottom:0,left:0,right:0}}>
-                    <div style={{display:'flex',justifyContent:'center',gap:8,padding:'0 0 10px'}}>
-                        {Array.from({length:count}).map((_,i)=>(<span key={i} style={{width:i===active?28:8,height:8,borderRadius:8,background:i===active?'var(--orange)':'var(--line)',transition:'all .3s'}}/>))}
-                    </div>
-                    <div style={{height:4,background:'#1A1F27'}}>
-                        <div key={slideKey} style={{height:'100%',background:'var(--orange)',animation:`grow ${SLIDE_MS}ms linear`}}/>
-                    </div>
+            return (<div style={{position:'fixed',bottom:0,left:0,right:0}}>
+                <div style={{display:'flex',justifyContent:'center',gap:8,padding:'0 0 9px'}}>
+                    {Array.from({length:count}).map((_,i)=>(<span key={i} style={{width:i===active?26:8,height:8,borderRadius:8,background:i===active?'var(--orange)':'var(--line)',transition:'all .3s'}}/>))}
                 </div>
-            );
+                <div style={{height:4,background:'#161A21'}}><div key={slideKey} style={{height:'100%',background:'var(--orange)',animation:`grow ${SLIDE_MS}ms linear`}}/></div>
+            </div>);
         });
 
-        const App = () => {
+        const App = ()=>{
             const [data,setData]=useState(null);
             const [slide,setSlide]=useState(0);
 
-            const load = async () => {
-                const { data: v } = await supabase.from('vans').select('*').eq('status','In Progress').order('target_completion_date',{ascending:true,nullsFirst:false});
-                const { data: t } = await supabase.from('tasks_template').select('*').in('department',['Flooring','Building']).eq('is_active',true);
+            const load = async ()=>{
+                const { data:v } = await supabase.from('vans').select('*').eq('status','In Progress').order('target_completion_date',{ascending:true,nullsFirst:false});
+                const { data:t } = await supabase.from('tasks_template').select('*').in('department',['Flooring','Building']).eq('is_active',true);
                 const ids=(v||[]).map(x=>x.id);
                 let inst=[], op=[];
                 if(ids.length){
-                    const { data: ii } = await supabase.from('task_instances').select('id,van_id,task_template_id,started_at,finished_at,active_work_minutes,worker_id').in('van_id',ids);
+                    const { data:ii } = await supabase.from('task_instances').select('id,van_id,task_template_id,started_at,finished_at,active_work_minutes,worker_id,created_at').in('van_id',ids);
                     inst=ii||[];
                     const iid=inst.map(x=>x.id);
-                    if(iid.length){
-                        const { data: pp } = await supabase.from('pause_logs').select('id,task_instance_id,worker_id,pause_reason_id,pause_start,pause_end').is('pause_end',null).in('task_instance_id',iid);
-                        op=pp||[];
-                    }
+                    if(iid.length){ const { data:pp } = await supabase.from('pause_logs').select('id,task_instance_id,worker_id,pause_reason_id,pause_start,pause_end').is('pause_end',null).in('task_instance_id',iid); op=pp||[]; }
                 }
-                const { data: w } = await supabase.from('workers').select('id,name');
-                const { data: r } = await supabase.from('pause_reasons').select('id,reason');
-                setData({vans:v||[],tmpl:t||[],inst,workers:w||[],reasons:r||[],openPauses:op});
+                const { data:w } = await supabase.from('workers').select('id,name,department,role,is_active');
+                const { data:r } = await supabase.from('pause_reasons').select('id,reason');
+                const { data:ds } = await supabase.from('daily_signoffs').select('worker_id').eq('signoff_date',todayStr());
+                setData({vans:v||[],tmpl:t||[],inst,workers:w||[],reasons:r||[],openPauses:op,signoffs:ds||[]});
             };
-
             useEffect(()=>{ load(); const t=setInterval(load,REFRESH_MS); return ()=>clearInterval(t); },[]);
             useEffect(()=>{ const t=setInterval(()=>setSlide(s=>s+1),SLIDE_MS); return ()=>clearInterval(t); },[]);
 
@@ -255,55 +269,77 @@
                     <div className="cond" style={{fontSize:28,color:'var(--muted)'}}>Loading floor data…</div>
                 </div>;
             }
-
-            const {vans,tmpl,inst,workers,reasons,openPauses}=data;
-            const wName=(id)=>{ const w=workers.find(x=>x.id===id); return w?w.name:'—'; };
-            const rName=(id)=>{ const r=reasons.find(x=>x.id===id); return r?r.reason:'Issue'; };
+            const {vans,tmpl,inst,workers,reasons,openPauses,signoffs}=data;
+            const wName=(id)=>{ const x=workers.find(z=>z.id===id); return x?x.name:'—'; };
+            const rName=(id)=>{ const x=reasons.find(z=>z.id===id); return x?x.reason:'Issue'; };
+            const taskDept=(id)=>{ const x=tmpl.find(z=>z.id===id); return x?x.department:null; };
+            const taskName=(id)=>{ const x=tmpl.find(z=>z.id===id); return x?x.task_name:'task'; };
+            const isToday=(iso)=> iso && iso.slice(0,10)===todayStr();
             const instById={}; inst.forEach(x=>instById[x.id]=x);
             const doneKey={}; inst.forEach(x=>{ if(x.finished_at) doneKey[`${x.van_id}-${x.task_template_id}`]=x; });
 
-            const stageProg=(van,dept,station)=>{
-                const ts=tmpl.filter(t=>t.department===dept&&(station?t.station===station:true));
-                let dm=0,tm=0,done=0;
-                ts.forEach(t=>{ const m=t.allocated_minutes||0; tm+=m; if(doneKey[`${van.id}-${t.id}`]){dm+=m;done++;} });
-                return {key:station||dept,pct:tm?Math.round(dm/tm*100):0,has:ts.length>0,doneCount:done,total:ts.length};
-            };
-            const overall=(van)=>{ const ts=tmpl; let dm=0,tm=0; ts.forEach(t=>{const m=t.allocated_minutes||0;tm+=m;if(doneKey[`${van.id}-${t.id}`])dm+=m;}); return {pct:tm?Math.round(dm/tm*100):0,remain:tm-dm}; };
-            const curStage=(van)=>{ for(const s of STAGES){ const p=stageProg(van,s.dept,s.station); if(p.has&&p.pct<100) return s.key; } return 'Done (tracked)'; };
+            const overall=(van)=>{ let dm=0,tm=0; tmpl.forEach(t=>{const m=t.allocated_minutes||0;tm+=m;if(doneKey[`${van.id}-${t.id}`])dm+=m;}); return {pct:tm?Math.round(dm/tm*100):0,remain:tm-dm}; };
+            const stageProg=(van,dept,station)=>{ const ts=tmpl.filter(t=>t.department===dept&&(station?t.station===station:true)); let dm=0,tm=0,done=0; ts.forEach(t=>{const m=t.allocated_minutes||0;tm+=m;if(doneKey[`${van.id}-${t.id}`]){dm+=m;done++;}}); return {key:station||dept,pct:tm?Math.round(dm/tm*100):0,has:ts.length>0,doneCount:done,total:ts.length}; };
+            const curStage=(van)=>{ for(const s of STAGES){ const p=stageProg(van,s.dept,s.station); if(p.has&&p.pct<100) return s.key; } return 'Finishing'; };
+            const nextDeptOf=(stageKey)=>{ if(stageKey==='Wiring'||stageKey==='Floor') return 'Vinyl & finish'; if(stageKey==='Vinyl & finish') return 'Building'; if(stageKey==='Building') return 'Wiring (next)'; return 'Interior'; };
+            const vanWorkerNow=(vanId)=>{ const a=inst.find(x=>x.van_id===vanId&&x.started_at&&!x.finished_at); return a?wName(a.worker_id):null; };
 
-            const byLine={1:[],2:[],3:[]};
-            vans.forEach(v=>{ if(byLine[v.production_line]) byLine[v.production_line].push(v); });
+            // lines
+            const byLine={1:[],2:[],3:[]}; vans.forEach(v=>{ if(byLine[v.production_line]) byLine[v.production_line].push(v); });
             const nextOut={1:byLine[1][0],2:byLine[2][0],3:byLine[3][0]};
-
             const lines={};
-            [1,2,3].forEach(L=>{ const v=nextOut[L]; const o=v?overall(v):{pct:0,remain:0}; lines[L]={count:byLine[L].length,van:v,badge:v?dueBadge(v):null,pct:o.pct,remain:o.remain,stage:v?curStage(v):''}; });
+            [1,2,3].forEach(L=>{ const v=nextOut[L]; if(!v){ lines[L]={count:0,van:null}; return; } const o=overall(v); const stg=curStage(v); lines[L]={count:byLine[L].length,van:v,badge:dueBadge(v),pct:o.pct,stage:stg,daysIn:v.start_date?daysBetween(v.start_date,todayStr()):'—',worker:vanWorkerNow(v.id),nextDept:nextDeptOf(stg),status:vanStatus(v,o.pct)}; });
 
-            const allBlockers=openPauses.map(p=>{ const i=instById[p.task_instance_id]; const v=vans.find(x=>x.id===(i&&i.van_id)); return v?{chassis:v.chassis_number,reason:rName(p.pause_reason_id)}:null; }).filter(Boolean);
+            // KPIs
+            const blockedVanIds=new Set(openPauses.map(p=>{ const i=instById[p.task_instance_id]; return i?i.van_id:null; }).filter(Boolean));
+            const lateCount=vans.filter(v=>{ const o=overall(v); return v.target_completion_date && daysBetween(todayStr(),v.target_completion_date)<0 && o.pct<100; }).length;
+            const onTrack=vans.filter(v=>vanStatus(v,overall(v).pct).t==='ON TRACK').length;
+            const activeWorkerIds=new Set(inst.filter(x=>x.started_at&&!x.finished_at).map(x=>x.worker_id));
+            const signedOnIds=new Set(signoffs.map(s=>s.worker_id));
+            const kpis={ inProgress:vans.length, target:LINE_TARGET[1]+LINE_TARGET[2]+LINE_TARGET[3], late:lateCount, blocked:blockedVanIds.size, onTrack, active:activeWorkerIds.size, signedOn:signedOnIds.size };
 
-            const slides=[{type:'overview'}];
-            [1,2,3].forEach(L=>{ if(nextOut[L]) slides.push({type:'van',line:L,van:nextOut[L]}); });
+            // departments
+            const deptList=['Flooring','Building'];
+            const depts=deptList.map(name=>{
+                const workersIn=workers.filter(w=>w.department===name&&w.is_active);
+                const todayInst=inst.filter(x=>taskDept(x.task_template_id)===name && (isToday(x.created_at)||isToday(x.started_at)));
+                const doneToday=todayInst.filter(x=>x.finished_at);
+                const activeTasks=todayInst.filter(x=>x.started_at&&!x.finished_at).length;
+                let alloc=0, act=0;
+                doneToday.forEach(x=>{ const t=tmpl.find(z=>z.id===x.task_template_id); if(t&&x.active_work_minutes>0){ alloc+=t.allocated_minutes||0; act+=x.active_work_minutes; } });
+                const eff = act>0? Math.round(alloc/act*100) : null;
+                const activeWorkers=new Set(todayInst.map(x=>x.worker_id)).size;
+                return { name, done:doneToday.length, activeTasks, eff, activeWorkers, totalWorkers:workersIn.length };
+            });
+
+            // workforce
+            const pausedIds=new Set(openPauses.map(p=>p.worker_id));
+            const wf={ signedOn:signedOnIds.size, active:activeWorkerIds.size, paused:pausedIds.size, idle:Math.max(0, signedOnIds.size - activeWorkerIds.size - pausedIds.size) };
+
+            // performers (efficiency from finished tasks today)
+            const perfMap={};
+            inst.filter(x=>x.finished_at && (isToday(x.created_at)||isToday(x.finished_at)) && x.active_work_minutes>0).forEach(x=>{ const t=tmpl.find(z=>z.id===x.task_template_id); if(!t)return; if(!perfMap[x.worker_id]) perfMap[x.worker_id]={alloc:0,act:0}; perfMap[x.worker_id].alloc+=t.allocated_minutes||0; perfMap[x.worker_id].act+=x.active_work_minutes; });
+            const performers=Object.keys(perfMap).map(id=>({name:wName(+id),eff:Math.round(perfMap[id].alloc/perfMap[id].act*100)})).sort((a,b)=>b.eff-a.eff).slice(0,3);
+
+            // deliveries next 7 days
+            const deliveries=vans.filter(v=>v.target_completion_date && daysBetween(todayStr(),v.target_completion_date)>=0 && daysBetween(todayStr(),v.target_completion_date)<=7)
+                .map(v=>{ const d=daysBetween(todayStr(),v.target_completion_date); return {...v,dleft:d===0?'today':d===1?'tomorrow':`in ${d} days`}; });
+
+            // blockers
+            const blockers=openPauses.map(p=>{ const i=instById[p.task_instance_id]; const v=vans.find(x=>x.id===(i&&i.van_id)); return v?{chassis:v.chassis_number,reason:rName(p.pause_reason_id),who:wName(p.worker_id),ago:since(p.pause_start)}:null; }).filter(Boolean);
+
+            const slides=['exec','ops'];
             const idx=slide%slides.length;
             const cur=slides[idx];
+            const body = cur==='exec'
+                ? <Exec kpis={kpis} lines={lines} blockers={blockers}/>
+                : <Ops depts={depts} workforce={wf} performers={performers} deliveries={deliveries} blockers={blockers}/>;
 
-            let body;
-            if(cur.type==='overview'){
-                body=(<React.Fragment><Overview lines={lines}/><BlockerBar blockers={allBlockers}/></React.Fragment>);
-            } else {
-                const v=cur.van;
-                const stages=STAGES.map(s=>stageProg(v,s.dept,s.station));
-                const active=inst.filter(x=>x.van_id===v.id&&x.started_at&&!x.finished_at).map(a=>{ const t=tmpl.find(x=>x.id===a.task_template_id); return {id:a.id,who:wName(a.worker_id),task:t?t.task_name:'task'}; });
-                const blockers=openPauses.filter(p=>{ const i=instById[p.task_instance_id]; return i&&i.van_id===v.id; }).map(b=>({id:b.id,reason:rName(b.pause_reason_id),who:wName(b.worker_id)}));
-                body=(<VanSlide line={cur.line} van={v} overall={overall(v)} stages={stages} active={active} blockers={blockers}/>);
-            }
-
-            return (
-                <div style={{height:'100%',paddingBottom:22}} key={cur.type==='van'?('v'+cur.van.id):'ov'}>
-                    {body}
-                    <Footer count={slides.length} active={idx} slideKey={slide}/>
-                </div>
-            );
+            return (<div style={{height:'100%',paddingBottom:20}} key={cur}>
+                {body}
+                <Footer count={slides.length} active={idx} slideKey={slide}/>
+            </div>);
         };
-
         ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
     </script>
 </body>
