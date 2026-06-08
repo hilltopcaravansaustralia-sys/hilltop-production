@@ -186,7 +186,18 @@
 
             const finishTask = () => {
                 setIsRunning(false);
-                setScreen('photos');
+                
+                // Check if this is the last task of the current work_day
+                const dayTasks = tasks.filter(t => t.work_day === currentWorkDay);
+                const isLastTaskOfDay = activeTask && activeTask.task_name && activeTask.task_name.toLowerCase().includes('clean');
+                
+                if (isLastTaskOfDay) {
+                    // Show photos only for the "Clean" task (last task of day)
+                    setScreen('photos');
+                } else {
+                    // For all other tasks, go straight to supervisor signoff
+                    setScreen('supervisor-signoff');
+                }
             };
 
             const uploadPhotos = async () => {
