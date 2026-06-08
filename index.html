@@ -56,6 +56,7 @@
         };
 
         const todayStr = () => new Date().toISOString().split('T')[0];
+        const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; };
         const nowIso = () => new Date().toISOString();
         const fmtClock = (d) => new Date(d).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
         const fmtDate = (s) => s ? new Date(s).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '—';
@@ -140,7 +141,7 @@
             }, [running, segStart, baseSec]);
 
             const loadDashboard = async (w) => {
-                const { data: vanData } = await supabase.from('vans').select('*').eq('status', 'In Progress').order('production_line', { ascending: true });
+                const { data: vanData } = await supabase.from('vans').select('*').eq('status', 'In Progress').order('target_completion_date', { ascending: true, nullsFirst: false });
                 const { data: taskData } = await supabase.from('tasks_template').select('*').eq('department', w.department).eq('is_active', true).order('sequence_order', { ascending: true });
                 const { data: instData } = await supabase.from('task_instances')
                     .select('id, van_id, task_template_id, finished_at, started_at, active_work_minutes')
@@ -156,10 +157,16 @@
             const myLabel = myStations ? (myStations.filter(s => s !== 'Shared')[0] || (worker ? worker.department : '')) : (worker ? worker.department : '');
 
             const vanProgress = (vanId) => {
-                if (!myTasks.length) return { done: 0, total: 0, pct: 0 };
-                let done = 0;
-                myTasks.forEach(t => { const c = completions[`${vanId}-${t.id}`]; if (c && c.finished_at) done++; });
-                return { done, total: myTasks.length, pct: Math.round((done / myTasks.length) * 100) };
+                if (!myTasks.length) return { done: 0, total: 0, pct: 0, doneMin: 0, totalMin: 0 };
+                let doneCount = 0, doneMin = 0, totalMin = 0;
+                myTasks.forEach(t => {
+                    const mins = t.allocated_minutes || 0;
+                    totalMin += mins;
+                    const c = completions[`${vanId}-${t.id}`];
+                    if (c && c.finished_at) { doneCount++; doneMin += mins; }
+                });
+                const pct = totalMin > 0 ? Math.round((doneMin / totalMin) * 100) : 0;
+                return { done: doneCount, total: myTasks.length, pct, doneMin, totalMin };
             };
 
             const doLogin = async () => {
@@ -346,7 +353,7 @@
                                 <button onClick={doLogin} disabled={loading || !pin} style={{ width: '100%', padding: 16, background: 'var(--orange)', color: 'var(--ink)', border: 'none', borderRadius: 12, fontSize: 17, fontWeight: 700, cursor: 'pointer', opacity: (loading || !pin) ? 0.5 : 1 }}>
                                     {loading ? 'Checking…' : 'Sign in'}
                                 </button>
-                                <div style={{ textAlign: 'center', marginTop: 14, fontSize: 11, color: '#B6BBC4', letterSpacing: '0.05em' }}>BUILD 2.3 · STATIONS</div>
+                                <div style={{ textAlign: 'center', marginTop: 14, fontSize: 11, color: '#B6BBC4', letterSpacing: '0.05em' }}>BUILD 2.4 · DASHBOARD</div>
                             </div>
                         </div>
                     </div>
@@ -366,7 +373,7 @@
                     <div style={{ minHeight: '100vh' }}>
                         <TopBar worker={worker} onLogout={logout} sub="Morning sign-on" />
                         <div className="fu" style={{ maxWidth: 560, margin: '0 auto', padding: 20 }}>
-                            <div className="cond" style={{ fontSize: 26, fontWeight: 700, textTransform: 'uppercase' }}>Good morning, {worker.name.split(' ')[0]}</div>
+                            <div className="cond" style={{ fontSize: 26, fontWeight: 700, textTransform: 'uppercase' }}>{greeting()}, {worker.name.split(' ')[0]}</div>
                             <div style={{ color: 'var(--muted)', marginBottom: 22 }}>Confirm your safety checks to start the day.</div>
                             <Check on={ppe} set={setPpe} title="PPE on" desc="Boots, hi-vis and eye protection where required." />
                             <Check on={whs} set={setWhs} title="WHS policy" desc="I will follow site safety procedures today." />
@@ -383,16 +390,23 @@
                     <div style={{ minHeight: '100vh' }}>
                         <TopBar worker={worker} onLogout={logout} sub={`${worker.department} · ${fmtDate(todayStr())}`} />
                         <div className="fu" style={{ maxWidth: 720, margin: '0 auto', padding: 20 }}>
+                            <div className="cond" style={{ fontSize: 22, fontWeight: 700, textTransform: 'uppercase', color: 'var(--orange)', marginBottom: 2 }}>{greeting()}, {worker.name.split(' ')[0]}</div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
                                 <div className="cond" style={{ fontSize: 24, fontWeight: 700, textTransform: 'uppercase' }}>Caravans on the floor</div>
                                 <div style={{ fontSize: 13, color: 'var(--muted)' }}>{vans.length} in progress</div>
                             </div>
-                            <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 18 }}>Tap a chassis to see your {worker.department.toLowerCase()} tasks.</div>
+                            <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 18 }}>Sorted by due date — most urgent first. Tap a chassis to see your {myLabel.toLowerCase()} tasks.</div>
                             {vans.length === 0 && (<div style={{ background: 'var(--card)', borderRadius: 14, padding: 40, textAlign: 'center', color: 'var(--muted)' }}>No caravans in progress right now.</div>)}
                             {vans.map((v, i) => {
                                 const p = vanProgress(v.id); const complete = p.pct >= 100;
+                                const dueMs = v.target_completion_date ? new Date(v.target_completion_date).getTime() : null;
+                                const days = dueMs != null ? Math.ceil((dueMs - new Date(todayStr()).getTime()) / 86400000) : null;
+                                const urgent = days != null && days <= 0;
+                                const soon = days != null && days > 0 && days <= 2;
+                                const dueColor = urgent ? 'var(--red)' : soon ? 'var(--amber)' : 'var(--ink)';
+                                const dueTag = days == null ? '' : days < 0 ? 'Overdue' : days === 0 ? 'Due today' : days === 1 ? 'Due tomorrow' : '';
                                 return (
-                                    <div key={v.id} onClick={() => openChassis(v)} className="tap fu" style={{ animationDelay: (i * 0.04) + 's', background: 'var(--card)', borderRadius: 14, padding: 18, marginBottom: 14, border: '1px solid var(--line)', cursor: 'pointer', boxShadow: '0 1px 2px rgba(20,25,35,0.04)' }}>
+                                    <div key={v.id} onClick={() => openChassis(v)} className="tap fu" style={{ animationDelay: (i * 0.04) + 's', background: 'var(--card)', borderRadius: 14, padding: 18, marginBottom: 14, border: `1px solid ${urgent ? '#F3C2C2' : 'var(--line)'}`, cursor: 'pointer', boxShadow: '0 1px 2px rgba(20,25,35,0.04)' }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                                             <div>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -401,11 +415,15 @@
                                                 </div>
                                                 <div style={{ color: 'var(--muted)', fontSize: 15, marginTop: 2 }}>{v.model}</div>
                                             </div>
-                                            <div style={{ textAlign: 'right' }}><div style={{ fontSize: 12, color: 'var(--muted)' }}>Due</div><div style={{ fontWeight: 700, fontSize: 15 }}>{fmtDate(v.target_completion_date)}</div></div>
+                                            <div style={{ textAlign: 'right' }}>
+                                                <div style={{ fontSize: 12, color: 'var(--muted)' }}>Due</div>
+                                                <div style={{ fontWeight: 700, fontSize: 15, color: dueColor }}>{fmtDate(v.target_completion_date)}</div>
+                                                {dueTag && <div style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: dueColor, borderRadius: 20, padding: '1px 8px', marginTop: 3, display: 'inline-block' }}>{dueTag}</div>}
+                                            </div>
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
                                             <div style={{ flex: 1 }}><Bar pct={p.pct} /></div>
-                                            <div style={{ fontSize: 13, fontWeight: 700, color: complete ? 'var(--green)' : 'var(--ink)', minWidth: 96, textAlign: 'right' }}>{p.done}/{p.total} {myLabel.toLowerCase()}</div>
+                                            <div style={{ fontSize: 13, fontWeight: 700, color: complete ? 'var(--green)' : 'var(--ink)', minWidth: 96, textAlign: 'right' }}>{p.pct}% {myLabel.toLowerCase()}</div>
                                         </div>
                                     </div>
                                 );
@@ -426,7 +444,7 @@
                             <div style={{ background: 'var(--ink)', color: '#fff', borderRadius: 14, padding: 18, marginBottom: 18 }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <div><span className="cond" style={{ fontSize: 30, fontWeight: 700 }}>{selectedVan.chassis_number}</span><div style={{ color: '#9AA1AD', fontSize: 15 }}>{selectedVan.model} · Line {selectedVan.production_line}</div></div>
-                                    <div style={{ textAlign: 'right' }}><div className="cond" style={{ fontSize: 30, fontWeight: 700, color: 'var(--orange)' }}>{p.pct}%</div><div style={{ color: '#9AA1AD', fontSize: 13 }}>{p.done} of {p.total} done</div></div>
+                                    <div style={{ textAlign: 'right' }}><div className="cond" style={{ fontSize: 30, fontWeight: 700, color: 'var(--orange)' }}>{p.pct}%</div><div style={{ color: '#9AA1AD', fontSize: 13 }}>{p.done} of {p.total} tasks · by time</div></div>
                                 </div>
                                 {selectedVan.notes && <div style={{ marginTop: 12, fontSize: 13, color: '#C9CED7', borderTop: '1px solid #353B47', paddingTop: 10 }}>Note: {selectedVan.notes}</div>}
                             </div>
