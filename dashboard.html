@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Hilltop Production — Office Display</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root{
+            --ink:#15181E; --ink-2:#1F242D; --panel:#252B35; --line:#333A45;
+            --muted:#9AA3B2; --orange:#F5A623; --green:#22C55E; --amber:#F59E0B;
+            --red:#EF4444; --slate:#64748B; --white:#F4F6F9;
+        }
+        *{margin:0;padding:0;box-sizing:border-box;}
+        html,body,#root{height:100%;}
+        body{font-family:'Barlow',sans-serif;background:var(--ink);color:var(--white);overflow:hidden;-webkit-font-smoothing:antialiased;}
+        .cond{font-family:'Barlow Condensed',sans-serif;letter-spacing:.01em;}
+        .num{font-variant-numeric:tabular-nums;}
+        @keyframes fade{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
+        .slide{animation:fade .5s ease both;}
+        @keyframes grow{from{width:0;}to{width:100%;}}
+        ::-webkit-scrollbar{display:none;}
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        const { createClient } = window.supabase;
+        const supabase = createClient(
+            'https://pycdvyaxldjfibncnvsg.supabase.co',
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5Y2R2eWF4bGRqZmlibmNudnNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MjY4NzcsImV4cCI6MjA5NjQwMjg3N30.RkI9yVJCMirdXUenl_fGUI5WiQr8n9TyToadiRCwkmI'
+        );
+
+        const SLIDE_MS = 120000; // 2 minutes
+        const REFRESH_MS = 30000; // poll every 30s
+        const LINE_TARGET = { 1: '4', 2: '5', 3: '2–3' };
+        const STAGES = [
+            { key: 'Wiring',  dept: 'Flooring', station: 'Wiring' },
+            { key: 'Floor',   dept: 'Flooring', station: 'Floor' },
+            { key: 'Vinyl & finish', dept: 'Flooring', station: 'Vinyl & finish' },
+            { key: 'Building', dept: 'Building', station: null }
+        ];
+        const todayStr = () => new Date().toISOString().split('T')[0];
+        const fmtDate = (s) => s ? new Date(s).toLocaleDateString('en-AU',{day:'numeric',month:'short'}) : '—';
+        const hhmm = (min) => { const h=Math.floor(min/60), m=Math.round(min%60); return h>0?`${h}h ${m}m`:`${m}m`; };
+
+        const App = () => {
+            const [vans,setVans]=useState([]);
+            const [tmpl,setTmpl]=useState([]);
+            const [inst,setInst]=useState([]);
+            const [workers,setWorkers]=useState([]);
+            const [reasons,setReasons]=useState([]);
+            const [openPauses,setOpenPauses]=useState([]);
+            const [slide,setSlide]=useState(0);
+            const [now,setNow]=useState(new Date());
+            const [updated,setUpdated]=useState(null);
+
+            const load = async () => {
+                const { data: v } = await supabase.from('vans').select('*').eq('status','In Progress').order('target_completion_date',{ascending:true,nullsFirst:false});
+                const { data: t } = await supabase.from('tasks_template').select('*').in('department',['Flooring','Building']).eq('is_active',true);
+                const ids = (v||[]).map(x=>x.id);
+                let i=[], op=[];
+                if (ids.length){
+                    const { data: ii } = await supabase.from('task_instances').select('id,van_id,task_template_id,started_at,finished_at,active_work_minutes,worker_id').in('van_id',ids);
+                    i = ii||[];
+                    const instIds = i.map(x=>x.id);
+                    if (instIds.length){
+                        const { data: pp } = await supabase.from('pause_logs').select('id,task_instance_id,worker_id,pause_reason_id,pause_start,pause_end').is('pause_end',null).in('task_instance_id',instIds);
+                        op = pp||[];
+                    }
+                }
+                const { data: w } = await supabase.from('workers').select('id,name');
+                const { data: r } = await supabase.from('pause_reasons').select('id,reason');
+                setVans(v||[]); setTmpl(t||[]); setInst(i); setWorkers(w||[]); setReasons(r||[]); setOpenPauses(op);
+                setUpdated(new Date());
+            };
+
+            useEffect(()=>{ load(); const t=setInterval(load,REFRESH_MS); return ()=>clearInterval(t); },[]);
+            useEffect(()=>{ const t=setInterval(()=>setSlide(s=>s+1),SLIDE_MS); return ()=>clearInterval(t); },[]);
+            useEffect(()=>{ const t=setInterval(()=>setNow(new Date()),1000); return ()=>clearInterval(t); },[]);
+
+            // lookups
+            const workerName = (id)=>{ const w=workers.find(x=>x.id===id); return w?w.name:'—'; };
+            const reasonName = (id)=>{ const r=reasons.find(x=>x.id===id); return r?r.reason:'Issue'; };
+            const instById = {}; inst.forEach(x=>instById[x.id]=x);
+            const doneKey = {}; inst.forEach(x=>{ if(x.finished_at) doneKey[`${x.van_id}-${x.task_template_id}`]=x; });
+
+            const stageProg = (van, dept, station) => {
+                const ts = tmpl.filter(t=>t.department===dept && (station? t.station===station : true));
+                let dm=0,tm=0,done=0;
+                ts.forEach(t=>{ const mins=t.allocated_minutes||0; tm+=mins; if(doneKey[`${van.id}-${t.id}`]){dm+=mins;done++;} });
+                return { pct: tm?Math.round(dm/tm*100):0, doneMin:dm, totalMin:tm, has: ts.length>0, doneCount:done, total:ts.length };
+            };
+            const vanOverall = (van) => {
+                const ts = tmpl.filter(t=> t.department==='Flooring' || t.department==='Building');
+                let dm=0,tm=0;
+                ts.forEach(t=>{ const mins=t.allocated_minutes||0; tm+=mins; if(doneKey[`${van.id}-${t.id}`]) dm+=mins; });
+                return { pct: tm?Math.round(dm/tm*100):0, remainMin: tm-dm, totalMin:tm };
+            };
+            const currentStage = (van) => {
+                for (const s of STAGES){ const p=stageProg(van,s.dept,s.station); if(p.has && p.pct<100) return s.key; }
+                return 'Done (tracked)';
+            };
+            const vanBlockers = (vanId) => openPauses.filter(p=>{ const i=instById[p.task_instance_id]; return i && i.van_id===vanId; });
+            const vanActiveWorkers = (vanId) => inst.filter(x=>x.van_id===vanId && x.started_at && !x.finished_at);
+
+            // group by line, next-out = earliest due in-progress per line
+            const byLine = {1:[],2:[],3:[]};
+            vans.forEach(v=>{ if(byLine[v.production_line]) byLine[v.production_line].push(v); });
+            const nextOut = { 1: byLine[1][0], 2: byLine[2][0], 3: byLine[3][0] };
+
+            // build slides
+            const slides = [{type:'overview'}];
+            [1,2,3].forEach(L=>{ if(nextOut[L]) slides.push({type:'van', line:L, van:nextOut[L]}); });
+            const cur = slides[slide % slides.length] || slides[0];
+
+            const allBlockers = openPauses.map(p=>{ const i=instById[p.task_instance_id]; const v=vans.find(x=>x.id===(i&&i.van_id)); return v?{chassis:v.chassis_number, reason:reasonName(p.pause_reason_id), who:workerName(p.worker_id)}:null; }).filter(Boolean);
+
+            const Header = ({title,sub}) => (
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'22px 40px',borderBottom:`1px solid var(--line)`}}>
+                    <div style={{display:'flex',alignItems:'center',gap:18}}>
+                        <img src="logo.png" alt="Hilltop" style={{height:46}}/>
+                        <div style={{borderLeft:'1px solid var(--line)',paddingLeft:18}}>
+                            <div className="cond" style={{fontSize:30,fontWeight:700,textTransform:'uppercase',lineHeight:1}}>{title}</div>
+                            <div style={{color:'var(--muted)',fontSize:15,marginTop:3}}>{sub}</div>
+                        </div>
+                    </div>
+                    <div style={{textAlign:'right'}}>
+                        <div className="cond num" style={{fontSize:34,fontWeight:700,lineHeight:1}}>{now.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'})}</div>
+                        <div style={{color:'var(--muted)',fontSize:14}}>{now.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'})}</div>
+                    </div>
+                </div>
+            );
+
+            const Bar = ({pct,h=14}) => (
+                <div style={{height:h,background:'#1A1F27',borderRadius:h,overflow:'hidden',width:'100%'}}>
+                    <div style={{height:'100%',width:pct+'%',background:pct>=100?'var(--green)':'var(--orange)',borderRadius:h,transition:'width .6s ease'}}/>
+                </div>
+            );
+
+            const dueBadge = (van) => {
+                if(!van.target_completion_date) return null;
+                const days=Math.ceil((new Date(van.target_completion_date).getTime()-new Date(todayStr()).getTime())/86400000);
+                if(days<0) return {t:'OVERDUE',c:'var(--red)'};
+                if(days===0) return {t:'DUE TODAY',c:'var(--red)'};
+                if(days===1) return {t:'DUE TOMORROW',c:'var(--amber)'};
+                return {t:`DUE ${fmtDate(van.target_completion_date).toUpperCase()}`,c:'var(--slate)'};
+            };
+
+            // ---------- OVERVIEW ----------
+            const Overview = () => (
+                <div className="slide" style={{height:'100%',display:'flex',flexDirection:'column'}} key="ov">
+                    <Header title="Production Floor" sub="Flooring & Building — live status"/>
+                    <div style={{flex:1,display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:24,padding:'28px 40px'}}>
+                        {[1,2,3].map(L=>{
+                            const v=nextOut[L]; const count=byLine[L].length;
+                            const o=v?vanOverall(v):null; const stg=v?currentStage(v):null; const db=v?dueBadge(v):null;
+                            return (
+                                <div key={L} style={{background:'var(--panel)',borderRadius:18,padding:28,display:'flex',flexDirection:'column',border:'1px solid var(--line)'}}>
+                                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline'}}>
+                                        <div className="cond" style={{fontSize:46,fontWeight:700,textTransform:'uppercase',lineHeight:1}}>Line {L}</div>
+                                        <div style={{color:'var(--muted)',fontSize:18}}>Target {LINE_TARGET[L]}/wk</div>
+                                    </div>
+                                    <div style={{color:'var(--muted)',fontSize:17,marginTop:6,marginBottom:22}}>{count} van{count!==1?'s':''} in build</div>
+                                    {v ? (
+                                        <div style={{marginTop:'auto'}}>
+                                            <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:6}}>
+                                                <span className="cond" style={{fontSize:40,fontWeight:700}}>{v.chassis_number}</span>
+                                                {db && <span style={{fontSize:13,fontWeight:700,background:db.c,color:'#fff',borderRadius:20,padding:'3px 12px'}}>{db.t}</span>}
+                                            </div>
+                                            <div style={{color:'var(--muted)',fontSize:18,marginBottom:16}}>{v.model} · {stg}</div>
+                                            <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',marginBottom:8}}>
+                                                <span className="cond num" style={{fontSize:64,fontWeight:700,color:o.pct>=100?'var(--green)':'var(--orange)',lineHeight:1}}>{o.pct}%</span>
+                                                <span style={{color:'var(--muted)',fontSize:17}}>{hhmm(o.remainMin)} left</span>
+                                            </div>
+                                            <Bar pct={o.pct}/>
+                                        </div>
+                                    ) : (
+                                        <div style={{marginTop:'auto',color:'var(--muted)',fontSize:20}}>No van in build</div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                    {allBlockers.length>0 ? (
+                        <div style={{background:'rgba(239,68,68,.12)',borderTop:'2px solid var(--red)',padding:'16px 40px',display:'flex',alignItems:'center',gap:18,flexWrap:'wrap'}}>
+                            <span className="cond" style={{fontSize:24,fontWeight:700,color:'var(--red)',textTransform:'uppercase'}}>⚠ {allBlockers.length} Blocker{allBlockers.length>1?'s':''}</span>
+                            {allBlockers.slice(0,4).map((b,i)=>(<span key={i} style={{fontSize:18}}><b className="cond">{b.chassis}</b> <span style={{color:'var(--muted)'}}>— {b.reason}</span></span>))}
+                        </div>
+                    ) : (
+                        <div style={{background:'rgba(34,197,94,.10)',borderTop:'2px solid var(--green)',padding:'14px 40px',fontSize:18,color:'var(--green)',fontWeight:600}}>No active blockers — floor running clean</div>
+                    )}
+                </div>
+            );
+
+            // ---------- VAN DETAIL ----------
+            const VanSlide = ({line,van}) => {
+                const o=vanOverall(van); const db=dueBadge(van);
+                const blockers=vanBlockers(van.id);
+                const active=vanActiveWorkers(van.id);
+                return (
+                    <div className="slide" style={{height:'100%',display:'flex',flexDirection:'column'}} key={'v'+van.id}>
+                        <Header title={`Line ${line} · Next out`} sub="Caravan due next from this line"/>
+                        <div style={{flex:1,padding:'30px 40px',display:'flex',flexDirection:'column'}}>
+                            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:26}}>
+                                <div>
+                                    <div style={{display:'flex',alignItems:'center',gap:16}}>
+                                        <span className="cond" style={{fontSize:88,fontWeight:700,lineHeight:.9}}>{van.chassis_number}</span>
+                                        {db && <span style={{fontSize:18,fontWeight:700,background:db.c,color:'#fff',borderRadius:24,padding:'6px 18px'}}>{db.t}</span>}
+                                    </div>
+                                    <div style={{color:'var(--muted)',fontSize:26,marginTop:4}}>{van.model} · Line {line}</div>
+                                </div>
+                                <div style={{textAlign:'right'}}>
+                                    <div className="cond num" style={{fontSize:104,fontWeight:700,color:o.pct>=100?'var(--green)':'var(--orange)',lineHeight:.9}}>{o.pct}%</div>
+                                    <div style={{color:'var(--muted)',fontSize:22}}>{hhmm(o.remainMin)} of work left</div>
+                                </div>
+                            </div>
+
+                            {/* stage tracker */}
+                            <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:16,marginBottom:26}}>
+                                {STAGES.map(s=>{
+                                    const p=stageProg(van,s.dept,s.station);
+                                    const color=p.pct>=100?'var(--green)':p.pct>0?'var(--amber)':'var(--slate)';
+                                    const state=p.pct>=100?'Done':p.pct>0?'In progress':'Not started';
+                                    return (
+                                        <div key={s.key} style={{background:'var(--panel)',border:`1px solid ${p.pct>0?color:'var(--line)'}`,borderRadius:16,padding:'20px 22px'}}>
+                                            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+                                                <span className="cond" style={{fontSize:26,fontWeight:700,textTransform:'uppercase'}}>{s.key}</span>
+                                                <span className="cond num" style={{fontSize:30,fontWeight:700,color}}>{p.pct}%</span>
+                                            </div>
+                                            <Bar pct={p.pct} h={10}/>
+                                            <div style={{color:'var(--muted)',fontSize:16,marginTop:10}}>{state} · {p.doneCount}/{p.total} tasks</div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20,flex:1}}>
+                                <div style={{background:'var(--panel)',border:'1px solid var(--line)',borderRadius:16,padding:24}}>
+                                    <div className="cond" style={{fontSize:22,fontWeight:700,textTransform:'uppercase',color:'var(--muted)',marginBottom:14}}>Working now</div>
+                                    {active.length===0 && <div style={{color:'var(--muted)',fontSize:20}}>No one on this van right now</div>}
+                                    {active.map(a=>{ const t=tmpl.find(x=>x.id===a.task_template_id); return (
+                                        <div key={a.id} style={{display:'flex',alignItems:'center',gap:12,marginBottom:12}}>
+                                            <span style={{width:11,height:11,borderRadius:11,background:'var(--green)'}}/>
+                                            <span style={{fontSize:21,fontWeight:600}}>{workerName(a.worker_id)}</span>
+                                            <span style={{color:'var(--muted)',fontSize:19}}>— {t?t.task_name:'task'}</span>
+                                        </div>
+                                    );})}
+                                </div>
+                                <div style={{background: blockers.length? 'rgba(239,68,68,.12)':'var(--panel)',border:`1px solid ${blockers.length?'var(--red)':'var(--line)'}`,borderRadius:16,padding:24}}>
+                                    <div className="cond" style={{fontSize:22,fontWeight:700,textTransform:'uppercase',color:blockers.length?'var(--red)':'var(--muted)',marginBottom:14}}>Blockers</div>
+                                    {blockers.length===0 && <div style={{color:'var(--muted)',fontSize:20}}>None — running clean</div>}
+                                    {blockers.map(b=>(
+                                        <div key={b.id} style={{marginBottom:12}}>
+                                            <span style={{fontSize:21,fontWeight:700,color:'var(--red)'}}>{reasonName(b.pause_reason_id)}</span>
+                                            <span style={{color:'var(--muted)',fontSize:18}}> — {workerName(b.worker_id)}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            // slide progress bar + dots
+            const Footer = () => (
+                <div style={{position:'fixed',bottom:0,left:0,right:0}}>
+                    <div style={{display:'flex',justifyContent:'center',gap:8,padding:'0 0 10px'}}>
+                        {slides.map((s,i)=>(<span key={i} style={{width:i===slide%slides.length?28:8,height:8,borderRadius:8,background:i===slide%slides.length?'var(--orange)':'var(--line)',transition:'all .3s'}}/>))}
+                    </div>
+                    <div style={{height:4,background:'#1A1F27'}}>
+                        <div key={slide} style={{height:'100%',background:'var(--orange)',animation:`grow ${SLIDE_MS}ms linear`}}/>
+                    </div>
+                </div>
+            );
+
+            if (!vans.length) {
+                return <div style={{height:'100%',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16}}>
+                    <img src="logo.png" style={{height:60,opacity:.8}}/>
+                    <div className="cond" style={{fontSize:28,color:'var(--muted)'}}>Loading floor data…</div>
+                </div>;
+            }
+
+            return (
+                <div style={{height:'100%',paddingBottom:22}}>
+                    {cur.type==='overview' ? <Overview/> : <VanSlide line={cur.line} van={cur.van}/>}
+                    <Footer/>
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+    </script>
+</body>
+</html>
