@@ -142,28 +142,46 @@
                     // Upload each photo to Supabase storage
                     for (let i = 0; i < photos.length; i++) {
                         const photo = photos[i];
-                        const fileName = `${worker.id}_${new Date().getTime()}_${photo.angle}.jpg`;
+                        const timestamp = new Date().getTime();
+                        const fileName = `${worker.id}-${timestamp}-${photo.angle}.jpg`;
                         
-                        // Convert base64 to blob
-                        const base64data = photo.data.split(',')[1];
-                        const binaryString = atob(base64data);
-                        const bytes = new Uint8Array(binaryString.length);
-                        for (let j = 0; j < binaryString.length; j++) {
-                            bytes[j] = binaryString.charCodeAt(j);
+                        try {
+                            // Convert base64 to blob
+                            const base64data = photo.data.split(',')[1];
+                            const binaryString = atob(base64data);
+                            const bytes = new Uint8Array(binaryString.length);
+                            for (let j = 0; j < binaryString.length; j++) {
+                                bytes[j] = binaryString.charCodeAt(j);
+                            }
+                            const blob = new Blob([bytes], { type: 'image/jpeg' });
+                            
+                            console.log(`📷 Uploading ${photo.angle}: ${fileName}, Size: ${blob.size} bytes`);
+                            
+                            const { data, error } = await supabase.storage
+                                .from('worker-photos')
+                                .upload(fileName, blob, {
+                                    contentType: 'image/jpeg',
+                                    upsert: false
+                                });
+                            
+                            if (error) {
+                                console.error(`❌ Upload error for ${photo.angle}:`, error);
+                                throw new Error(`${photo.angle}: ${error.message}`);
+                            }
+                            
+                            console.log(`✅ ${photo.angle} uploaded:`, data);
+                        } catch (photoErr) {
+                            console.error(`Error uploading ${photo.angle}:`, photoErr);
+                            throw photoErr;
                         }
-                        const blob = new Blob([bytes], { type: 'image/jpeg' });
-                        
-                        await supabase.storage
-                            .from('worker-photos')
-                            .upload(fileName, blob, {
-                                contentType: 'image/jpeg'
-                            });
                     }
 
+                    console.log('✅ All photos uploaded successfully!');
                     alert('✓ Photos uploaded successfully!');
                     setPhotos([]);
                     setScreen('task-list');
                 } catch (err) {
+                    console.error('Upload failed:', err);
                     alert('Error uploading photos: ' + err.message);
                 }
                 setLoading(false);
