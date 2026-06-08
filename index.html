@@ -65,7 +65,9 @@
             const [isRunning, setIsRunning] = useState(false);
             const [isPaused, setIsPaused] = useState(false);
             const [pauseReason, setPauseReason] = useState(null);
-            const [completedTasks, setCompletedTasks] = useState([]);
+            const [completedTaskIds, setCompletedTaskIds] = useState([]);
+            const [completedTaskDetails, setCompletedTaskDetails] = useState([]);
+            const [todayDate, setTodayDate] = useState(new Date().toISOString().split('T')[0]);
             const [photos, setPhotos] = useState([]);
             const videoRef = useRef(null);
             const canvasRef = useRef(null);
@@ -219,23 +221,43 @@
                 }
                 setLoading(true);
                 try {
+                    const today = new Date().toISOString().split('T')[0];
+                    setTodayDate(today);
+                    
                     await supabase.from('daily_signoffs').insert([{
                         worker_id: worker.id,
-                        signoff_date: new Date().toISOString().split('T')[0],
+                        signoff_date: today,
                         ppe_acknowledged: true,
                         whs_policy_acknowledged: true
                     }]);
                     
+                    // Fetch all tasks for this department
                     const { data: tasksData } = await supabase
                         .from('tasks_template')
                         .select('*')
                         .eq('department', worker.department)
                         .order('sequence_order', { ascending: true });
                     
-                    setTasks(tasksData || []);
+                    // Fetch completed tasks for today
+                    const { data: completedData } = await supabase
+                        .from('task_instances')
+                        .select('id, task_template_id, started_at, finished_at, total_elapsed_minutes')
+                        .eq('worker_id', worker.id)
+                        .gte('created_at', today + 'T00:00:00')
+                        .lte('created_at', today + 'T23:59:59');
+                    
+                    // Extract completed task IDs
+                    const completedIds = (completedData || []).map(t => t.task_template_id);
+                    setCompletedTaskIds(completedIds);
+                    setCompletedTaskDetails(completedData || []);
+                    
+                    // Filter out completed tasks
+                    const incompleteTasks = (tasksData || []).filter(t => !completedIds.includes(t.id));
+                    setTasks(incompleteTasks);
                     setScreen('task-list');
                 } catch (err) {
-                    alert('Error during sign-off');
+                    alert('Error during sign-off: ' + err.message);
+                    console.error(err);
                 }
                 setLoading(false);
             };
@@ -357,7 +379,7 @@
             const finishTask = async () => {
                 setLoading(true);
                 try {
-                    await supabase.from('task_instances').insert([{
+                    const { data: newInstance } = await supabase.from('task_instances').insert([{
                         worker_id: worker.id,
                         van_id: 1,
                         task_template_id: activeTask.id,
@@ -366,9 +388,21 @@
                         total_elapsed_minutes: Math.floor(timer / 60),
                         active_work_minutes: Math.floor(timer / 60),
                         signoff_status: 'pending'
-                    }]);
+                    }]).select();
 
-                    setCompletedTasks([...completedTasks, activeTask.task_name]);
+                    // Update completed task tracking
+                    const newCompletedIds = [...completedTaskIds, activeTask.id];
+                    setCompletedTaskIds(newCompletedIds);
+                    setCompletedTaskDetails([...completedTaskDetails, {
+                        id: newInstance[0]?.id,
+                        task_template_id: activeTask.id,
+                        total_elapsed_minutes: Math.floor(timer / 60)
+                    }]);
+                    
+                    // Remove from incomplete tasks
+                    setTasks(tasks.filter(t => t.id !== activeTask.id));
+                    
+                    console.log('✅ Task completed:', activeTask.task_name);
                     
                     // Check if this is the last task (Clean workplace and bins)
                     const isLastTask = activeTask.task_name && activeTask.task_name.toLowerCase().includes('clean workplace');
@@ -385,7 +419,8 @@
                         setScreen('task-list');
                     }
                 } catch (err) {
-                    alert('Error saving task');
+                    console.error('Error saving task:', err);
+                    alert('Error saving task: ' + err.message);
                 }
                 setLoading(false);
             };
@@ -395,7 +430,8 @@
                 setScreen('login');
                 setPinInput('');
                 setTasks([]);
-                setCompletedTasks([]);
+                setCompletedTaskIds([]);
+                setCompletedTaskDetails([]);
                 setPhotos([]);
             };
 
@@ -505,6 +541,14 @@
 
             // TASK LIST
             if (screen === 'task-list') {
+                const totalTasks = tasks.length + completedTaskIds.length;
+                const completedCount = completedTaskIds.length;
+                const percentComplete = totalTasks > 0 ? Math.round((completedCount / totalTasks) * 100) : 0;
+                const percentRemaining = 100 - percentComplete;
+                
+                // Calculate remaining time from incomplete tasks
+                const remainingMinutes = tasks.reduce((sum, t) => sum + (t.allocated_minutes || 0), 0);
+                
                 return (
                     <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
                         <div style={{ maxWidth: '600px', margin: '0 auto' }}>
@@ -515,18 +559,69 @@
                                 </button>
                             </div>
                             
-                            {tasks.map((task, idx) => (
-                                <div key={idx} onClick={() => selectTask(task)} style={{ background: 'white', padding: '16px', marginBottom: '12px', borderRadius: '8px', border: `2px solid ${HILLTOP_COLORS.orange}`, cursor: 'pointer' }}>
-                                    <h3 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '8px' }}>{task.task_name}</h3>
-                                    <p style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>{task.station || 'Station'}</p>
-                                    <p style={{ color: HILLTOP_COLORS.orange, fontWeight: 'bold' }}>⏱️ {task.allocated_minutes} min</p>
+                            {/* Progress Bar */}
+                            <div style={{ background: 'white', padding: '20px', borderRadius: '8px', marginBottom: '20px', border: `2px solid ${HILLTOP_COLORS.orange}` }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                                    <span style={{ fontWeight: 'bold', color: HILLTOP_COLORS.charcoal }}>Progress: {completedCount}/{totalTasks}</span>
+                                    <span style={{ fontWeight: 'bold', color: HILLTOP_COLORS.green }}>{percentComplete}% Done</span>
                                 </div>
-                            ))}
+                                <div style={{ width: '100%', height: '20px', background: '#e0e0e0', borderRadius: '10px', overflow: 'hidden' }}>
+                                    <div style={{ width: `${percentComplete}%`, height: '100%', background: HILLTOP_COLORS.green, transition: 'width 0.3s ease' }} />
+                                </div>
+                                <div style={{ marginTop: '10px', fontSize: '14px', color: '#666' }}>
+                                    ⏱️ Time remaining: {remainingMinutes} minutes ({percentRemaining}% of work left)
+                                </div>
+                            </div>
+                            
+                            {/* Incomplete Tasks */}
+                            {tasks.length > 0 ? (
+                                <div>
+                                    <h3 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '10px' }}>📋 Tasks to Complete:</h3>
+                                    {tasks.map((task, idx) => (
+                                        <div 
+                                            key={idx} 
+                                            onClick={() => selectTask(task)} 
+                                            style={{ 
+                                                background: 'white', 
+                                                padding: '16px', 
+                                                marginBottom: '12px', 
+                                                borderRadius: '8px', 
+                                                border: `2px solid ${HILLTOP_COLORS.orange}`, 
+                                                cursor: 'pointer',
+                                                transition: 'transform 0.2s',
+                                                transform: 'scale(1)'
+                                            }}
+                                            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                                            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                                        >
+                                            <h3 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '8px' }}>{task.task_name}</h3>
+                                            <p style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>{task.station || 'Station'}</p>
+                                            <p style={{ color: HILLTOP_COLORS.orange, fontWeight: 'bold' }}>⏱️ {task.allocated_minutes} min</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div style={{ background: HILLTOP_COLORS.green, color: 'white', padding: '20px', borderRadius: '8px', textAlign: 'center', marginBottom: '20px' }}>
+                                    <h3>🎉 All Tasks Completed!</h3>
+                                    <p>Great work today!</p>
+                                </div>
+                            )}
 
-                            {completedTasks.length > 0 && (
+                            {/* Completed Tasks */}
+                            {completedTaskDetails.length > 0 && (
                                 <div style={{ marginTop: '30px', padding: '20px', background: HILLTOP_COLORS.green, borderRadius: '8px', color: 'white' }}>
-                                    <h3 style={{ marginBottom: '10px' }}>✓ Completed Today:</h3>
-                                    {completedTasks.map((task, idx) => (<div key={idx}>✓ {task}</div>))}
+                                    <h3 style={{ marginBottom: '15px' }}>✓ Completed Tasks:</h3>
+                                    {completedTaskDetails.map((completed, idx) => {
+                                        const taskTemplate = tasks.length > 0 ? null : 'Completed';
+                                        return (
+                                            <div key={idx} style={{ marginBottom: '8px', opacity: 0.9 }}>
+                                                <div style={{ fontWeight: 'bold' }}>✓ Task #{idx + 1}</div>
+                                                <div style={{ fontSize: '13px', marginLeft: '16px' }}>
+                                                    ⏱️ Time taken: {completed.total_elapsed_minutes} minutes
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>
