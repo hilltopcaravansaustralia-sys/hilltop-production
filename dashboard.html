@@ -51,6 +51,20 @@
             { key:'Vinyl & finish', dept:'Flooring', station:'Vinyl & finish' },
             { key:'Building', dept:'Building', station:null }
         ];
+        // Full production chain (back -> front). Only stages with tasks loaded are "active".
+        const CHAIN = [
+            { key:'Flooring', dept:'Flooring' },
+            { key:'Building', dept:'Building' },
+            { key:'Wiring', dept:'Wiring' },
+            { key:'Insulation', dept:'Insulation' },
+            { key:'Cladding', dept:'Cladding' },
+            { key:'Exterior fitting', dept:'Exterior fitting' },
+            { key:'Plumbing', dept:'Plumbing' },
+            { key:'Interior finishing', dept:'Interior finishing' },
+            { key:'Pre-delivery detail', dept:'Pre-delivery detail' },
+            { key:'Quality check', dept:'Quality check' },
+            { key:'Ready for delivery', dept:'Ready for delivery' }
+        ];
         const todayStr = () => new Date().toISOString().split('T')[0];
         const NON_BLOCKER = ['Tea break','Lunch break','Toilet break','Helping another worker'];
         const fmtDate = (s)=> s? new Date(s).toLocaleDateString('en-AU',{day:'numeric',month:'short'}) : '—';
@@ -134,11 +148,21 @@
                                         <span className="cond" style={{fontSize:38,fontWeight:700}}>{d.van.chassis_number}</span>
                                         {d.badge && <span style={{fontSize:12,fontWeight:700,background:d.badge.c,color:'#fff',borderRadius:18,padding:'2px 10px'}}>{d.badge.t}</span>}
                                     </div>
-                                    <div style={{color:'var(--muted)',fontSize:16}}>{d.van.model} · {d.stage}</div>
+                                    <div style={{color:d.stageState==='behind'?'var(--red)':'var(--muted)',fontSize:16,fontWeight:d.stageState==='behind'?700:400}}>{d.van.model} · {d.stage}</div>
                                     <div style={{display:'flex',gap:20,margin:'12px 0',fontSize:14}}>
                                         <div><div style={{color:'var(--muted)'}}>Day in prod.</div><div className="num" style={{fontSize:22,fontWeight:700}}>{d.daysIn}</div></div>
                                         <div><div style={{color:'var(--muted)'}}>On van now</div><div style={{fontSize:18,fontWeight:600}}>{d.worker||'—'}</div></div>
-                                        <div><div style={{color:'var(--muted)'}}>Next dept</div><div style={{fontSize:18,fontWeight:600}}>{d.nextDept}</div></div>
+                                    </div>
+                                    {/* production chain flow */}
+                                    <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap',marginBottom:12}}>
+                                        {d.stages.filter(s=>s.status!=='not-set-up').map((s,si,arr)=>{
+                                            const c = s.status==='done'?'var(--green)':s.status==='in-progress'?(s.behindMin>0?'var(--red)':'var(--amber)'):'var(--slate)';
+                                            return (<React.Fragment key={s.key}>
+                                                <span style={{fontSize:13,fontWeight:700,color:c,border:`1px solid ${c}`,borderRadius:14,padding:'2px 9px',textTransform:'uppercase'}}>{s.key}{s.status==='done'?' ✓':''}</span>
+                                                {si<arr.length-1 && <span style={{color:'var(--line)',fontSize:14}}>▸</span>}
+                                            </React.Fragment>);
+                                        })}
+                                        <span style={{fontSize:12,color:'var(--muted)',marginLeft:4}}>+ {CHAIN.length - d.stages.filter(s=>s.status!=='not-set-up').length} more stages to set up</span>
                                     </div>
                                     <div style={{marginTop:'auto'}}>
                                         <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',marginBottom:6}}>
@@ -281,15 +305,51 @@
 
             const overall=(van)=>{ let dm=0,tm=0; tmpl.forEach(t=>{const m=t.allocated_minutes||0;tm+=m;if(doneKey[`${van.id}-${t.id}`])dm+=m;}); return {pct:tm?Math.round(dm/tm*100):0,remain:tm-dm}; };
             const stageProg=(van,dept,station)=>{ const ts=tmpl.filter(t=>t.department===dept&&(station?t.station===station:true)); let dm=0,tm=0,done=0; ts.forEach(t=>{const m=t.allocated_minutes||0;tm+=m;if(doneKey[`${van.id}-${t.id}`]){dm+=m;done++;}}); return {key:station||dept,pct:tm?Math.round(dm/tm*100):0,has:ts.length>0,doneCount:done,total:ts.length}; };
-            const curStage=(van)=>{ for(const s of STAGES){ const p=stageProg(van,s.dept,s.station); if(p.has&&p.pct<100) return s.key; } return 'Finishing'; };
-            const nextDeptOf=(stageKey)=>{ if(stageKey==='Wiring'||stageKey==='Floor') return 'Vinyl & finish'; if(stageKey==='Vinyl & finish') return 'Building'; if(stageKey==='Building') return 'Wiring (next)'; return 'Interior'; };
             const vanWorkerNow=(vanId)=>{ const a=inst.find(x=>x.van_id===vanId&&x.started_at&&!x.finished_at); return a?wName(a.worker_id):null; };
+
+            // ---- STAGE ENGINE: per-van position in the production chain ----
+            const tmplByDept={}; tmpl.forEach(t=>{ (tmplByDept[t.department]=tmplByDept[t.department]||[]).push(t); });
+            const computeStages=(van)=>{
+                const out=[]; let prevDoneAt=null;
+                CHAIN.forEach((s,idx)=>{
+                    const tasks=tmplByDept[s.dept]||[];
+                    const allocated=tasks.reduce((a,t)=>a+(t.allocated_minutes||0),0);
+                    const vInst=inst.filter(i=>i.van_id===van.id && taskDept(i.task_template_id)===s.dept);
+                    const starts=vInst.filter(i=>i.started_at).map(i=>new Date(i.started_at).getTime());
+                    const finishedIds=new Set(vInst.filter(i=>i.finished_at).map(i=>i.task_template_id));
+                    const allDone = tasks.length>0 && tasks.every(t=>finishedIds.has(t.id));
+                    const doneAt = allDone ? Math.max(...vInst.filter(i=>i.finished_at).map(i=>new Date(i.finished_at).getTime())) : null;
+                    const enteredAt = idx===0 ? (starts.length?Math.min(...starts):null) : prevDoneAt; // first stage: first task start; others: handover
+                    let status, actualMin=0, behindMin=0;
+                    if(tasks.length===0) status='not-set-up';
+                    else if(enteredAt==null) status='waiting';
+                    else { const end=doneAt??Date.now(); actualMin=Math.max(0,(end-enteredAt)/60000); behindMin=Math.max(0,actualMin-allocated); status=allDone?'done':'in-progress'; }
+                    out.push({key:s.key,dept:s.dept,allocated,enteredAt,doneAt,actualMin:Math.round(actualMin),behindMin:Math.round(behindMin),status,onTime:status==='done'?actualMin<=allocated:behindMin===0});
+                    prevDoneAt = status==='done' ? doneAt : null;
+                });
+                return out;
+            };
+            const stageInfo=(van)=>{
+                const st=computeStages(van);
+                const cur=st.find(s=>s.status==='in-progress') || st.find(s=>s.status==='waiting' && (tmplByDept[s.dept]||[]).length>0) || st.find(s=>s.status!=='done'&&s.status!=='not-set-up');
+                const done=st.filter(s=>s.status==='done');
+                return { stages:st, current:cur, lastDone: done.length?done[done.length-1]:null };
+            };
 
             // lines
             const byLine={1:[],2:[],3:[]}; vans.forEach(v=>{ if(byLine[v.production_line]) byLine[v.production_line].push(v); });
             const nextOut={1:byLine[1][0],2:byLine[2][0],3:byLine[3][0]};
             const lines={};
-            [1,2,3].forEach(L=>{ const v=nextOut[L]; if(!v){ lines[L]={count:0,van:null}; return; } const o=overall(v); const stg=curStage(v); lines[L]={count:byLine[L].length,van:v,badge:dueBadge(v),pct:o.pct,stage:stg,daysIn:v.start_date?daysBetween(v.start_date,todayStr()):'—',worker:vanWorkerNow(v.id),nextDept:nextDeptOf(stg),status:vanStatus(v,o.pct)}; });
+            [1,2,3].forEach(L=>{
+                const v=nextOut[L]; if(!v){ lines[L]={count:0,van:null}; return; }
+                const o=overall(v); const si=stageInfo(v); const cur=si.current;
+                let stageText, behind=0, stageState='ok';
+                if(!cur){ stageText='Finishing'; }
+                else if(cur.status==='waiting'){ stageText=`Awaiting ${cur.key}`; }
+                else { stageText=`In ${cur.key}`; behind=cur.behindMin; stageState = behind>0?'behind':'ok'; if(behind>0) stageText=`In ${cur.key} · ${behind}m behind`; else stageText=`In ${cur.key} · on time`; }
+                const status = behind>0 ? {t:`BEHIND ${behind}m`,c:'var(--red)'} : vanStatus(v,o.pct);
+                lines[L]={count:byLine[L].length,van:v,badge:dueBadge(v),pct:o.pct,stage:stageText,stageState,behind,stages:si.stages,daysIn:v.start_date?daysBetween(v.start_date,todayStr()):'—',worker:vanWorkerNow(v.id),status};
+            });
 
             // only today's open pauses, and split breaks from real blockers
             const openToday = openPauses.filter(p => p.pause_start && p.pause_start.slice(0,10)===todayStr());
