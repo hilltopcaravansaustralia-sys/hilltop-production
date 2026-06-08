@@ -131,6 +131,17 @@
                 setActiveTask(task);
                 setTimer(0);
                 setIsRunning(true);
+                setPauseReason(null);
+                setScreen('task-detail');
+            };
+
+            const handlePause = () => {
+                setIsRunning(false);
+                setScreen('pause-reason');
+            };
+
+            const confirmPause = (reason) => {
+                setPauseReason(reason);
                 setScreen('task-detail');
             };
 
@@ -431,11 +442,11 @@
                             </div>
 
                             <button
-                                onClick={() => setIsRunning(!isRunning)}
+                                onClick={handlePause}
                                 style={{
                                     width: '100%',
                                     padding: '14px',
-                                    background: isRunning ? HILLTOP_COLORS.red : HILLTOP_COLORS.green,
+                                    background: HILLTOP_COLORS.red,
                                     color: 'white',
                                     border: 'none',
                                     borderRadius: '8px',
@@ -445,7 +456,7 @@
                                     cursor: 'pointer'
                                 }}
                             >
-                                {isRunning ? '⏸️ PAUSE' : '▶️ RESUME'}
+                                ⏸️ PAUSE
                             </button>
 
                             <button
@@ -464,6 +475,39 @@
                             >
                                 ✓ FINISH TASK
                             </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            // PAUSE REASON SELECTION
+            if (screen === 'pause-reason') {
+                return (
+                    <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
+                        <div style={{ maxWidth: '600px', margin: '0 auto' }}>
+                            <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>Why are you pausing?</h2>
+                            
+                            {PAUSE_REASONS.map((reason, idx) => (
+                                <button
+                                    key={idx}
+                                    onClick={() => confirmPause(reason)}
+                                    style={{
+                                        width: '100%',
+                                        padding: '14px',
+                                        background: 'white',
+                                        color: HILLTOP_COLORS.charcoal,
+                                        border: `2px solid ${HILLTOP_COLORS.orange}`,
+                                        borderRadius: '8px',
+                                        marginBottom: '10px',
+                                        fontSize: '16px',
+                                        fontWeight: 'bold',
+                                        cursor: 'pointer',
+                                        textAlign: 'left'
+                                    }}
+                                >
+                                    {reason}
+                                </button>
+                            ))}
                         </div>
                     </div>
                 );
