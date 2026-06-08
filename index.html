@@ -17,30 +17,13 @@
     <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --ink: #1C1F26;
-            --ink-2: #2A2F3A;
-            --paper: #F4F5F7;
-            --card: #FFFFFF;
-            --line: #E2E5EA;
-            --muted: #6B7280;
-            --orange: #F5A623;
-            --orange-d: #D98A0B;
-            --green: #16A34A;
-            --green-bg: #E7F6EC;
-            --amber: #F59E0B;
-            --amber-bg: #FEF3DC;
-            --slate: #64748B;
-            --red: #DC2626;
-            --red-bg: #FDECEC;
-            --blue: #2563EB;
+            --ink: #1C1F26; --ink-2: #2A2F3A; --paper: #F4F5F7; --card: #FFFFFF;
+            --line: #E2E5EA; --muted: #6B7280; --orange: #F5A623; --orange-d: #D98A0B;
+            --green: #16A34A; --green-bg: #E7F6EC; --amber: #F59E0B; --amber-bg: #FEF3DC;
+            --slate: #64748B; --red: #DC2626; --red-bg: #FDECEC;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body {
-            font-family: 'Barlow', -apple-system, sans-serif;
-            background: var(--paper);
-            color: var(--ink);
-            -webkit-font-smoothing: antialiased;
-        }
+        body { font-family: 'Barlow', -apple-system, sans-serif; background: var(--paper); color: var(--ink); -webkit-font-smoothing: antialiased; }
         #root { min-height: 100vh; }
         .cond { font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.01em; }
         button { font-family: 'Barlow', sans-serif; }
@@ -62,31 +45,17 @@
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5Y2R2eWF4bGRqZmlibmNudnNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MjY4NzcsImV4cCI6MjA5NjQwMjg3N30.RkI9yVJCMirdXUenl_fGUI5WiQr8n9TyToadiRCwkmI';
         const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        const ISSUE_REASONS = [
-            'Missing part',
-            'Waiting for another department',
-            'Drawing / plan problem',
-            'Quality issue',
-            'Tool or equipment breakdown',
-            'Stock not available',
-            'Supervisor request',
-            'Other'
-        ];
-
         const todayStr = () => new Date().toISOString().split('T')[0];
+        const nowIso = () => new Date().toISOString();
         const fmtClock = (d) => new Date(d).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
         const fmtDate = (s) => s ? new Date(s).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '—';
 
-        const StatusDot = ({ color }) => (
-            <span style={{ width: 9, height: 9, borderRadius: 9, background: color, display: 'inline-block', flexShrink: 0 }} />
-        );
-
+        const StatusDot = ({ color }) => (<span style={{ width: 9, height: 9, borderRadius: 9, background: color, display: 'inline-block', flexShrink: 0 }} />);
         const Bar = ({ pct }) => (
             <div style={{ height: 7, background: '#EAECEF', borderRadius: 6, overflow: 'hidden', width: '100%' }}>
                 <div style={{ height: '100%', width: pct + '%', background: pct >= 100 ? 'var(--green)' : 'var(--orange)', borderRadius: 6, transition: 'width 0.4s ease' }} />
             </div>
         );
-
         const TopBar = ({ worker, onLogout, sub }) => (
             <div style={{ background: 'var(--ink)', color: '#fff', padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 20 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -110,6 +79,14 @@
             </div>
         );
 
+        // on-time / late from active minutes vs allocated
+        const timeStatus = (activeMin, allocatedMin) => {
+            if (allocatedMin == null || allocatedMin <= 0) return { label: 'Completed', color: 'var(--green)', late: false };
+            if (activeMin <= allocatedMin) return { label: `On time · ${activeMin} of ${allocatedMin} min`, color: 'var(--green)', late: false };
+            const pct = Math.round(((activeMin - allocatedMin) / allocatedMin) * 100);
+            return { label: `${pct}% over · took ${activeMin} min (target ${allocatedMin})`, color: 'var(--red)', late: true };
+        };
+
         const App = () => {
             const [screen, setScreen] = useState('login');
             const [worker, setWorker] = useState(null);
@@ -121,65 +98,60 @@
             const [vans, setVans] = useState([]);
             const [deptTasks, setDeptTasks] = useState([]);
             const [completions, setCompletions] = useState({});
+            const [pauseReasons, setPauseReasons] = useState([]);
 
             const [selectedVan, setSelectedVan] = useState(null);
             const [activeTask, setActiveTask] = useState(null);
             const [activeInstanceId, setActiveInstanceId] = useState(null);
-            const [startedAt, setStartedAt] = useState(null);
-            const [elapsedSec, setElapsedSec] = useState(0);
+            const [startedAt, setStartedAt] = useState(null);   // original DB start (for total elapsed + display)
+
+            // active-time tracking (pause excluded)
+            const [baseSec, setBaseSec] = useState(0);          // accumulated active seconds before current running segment
+            const [segStart, setSegStart] = useState(null);     // ms timestamp of current running segment
+            const [elapsedSec, setElapsedSec] = useState(0);    // displayed active seconds
             const [running, setRunning] = useState(false);
             const [pausedIssue, setPausedIssue] = useState(null);
             const [openPauseLogId, setOpenPauseLogId] = useState(null);
 
             const [issueReason, setIssueReason] = useState(null);
             const [issueNote, setIssueNote] = useState('');
-            const [issueMode, setIssueMode] = useState('pause');
 
-            const [photos, setPhotos] = useState([]);
+            const [photos, setPhotos] = useState({});           // angle -> publicUrl
+            const [previews, setPreviews] = useState({});       // angle -> objectURL
+            const [uploadingAngle, setUploadingAngle] = useState(null);
             const [supPin, setSupPin] = useState('');
+            const fileRef = useRef(null);
+            const pendingAngle = useRef(null);
             const tick = useRef(null);
 
+            // ---- active timer (excludes pause) ----
             useEffect(() => {
-                if (running && startedAt) {
+                if (running && segStart) {
                     tick.current = setInterval(() => {
-                        setElapsedSec(Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
+                        setElapsedSec(baseSec + Math.floor((Date.now() - segStart) / 1000));
                     }, 1000);
+                } else {
+                    clearInterval(tick.current);
                 }
                 return () => clearInterval(tick.current);
-            }, [running, startedAt]);
+            }, [running, segStart, baseSec]);
 
             const loadDashboard = async (w) => {
-                const { data: vanData } = await supabase
-                    .from('vans').select('*')
-                    .eq('status', 'In Progress')
-                    .order('production_line', { ascending: true });
-
-                const { data: taskData } = await supabase
-                    .from('tasks_template').select('*')
-                    .eq('department', w.department)
-                    .eq('is_active', true)
-                    .order('sequence_order', { ascending: true });
-
-                const { data: instData } = await supabase
-                    .from('task_instances').select('id, van_id, task_template_id, finished_at, started_at')
-                    .eq('worker_id', w.id)
-                    .gte('created_at', todayStr() + 'T00:00:00');
-
+                const { data: vanData } = await supabase.from('vans').select('*').eq('status', 'In Progress').order('production_line', { ascending: true });
+                const { data: taskData } = await supabase.from('tasks_template').select('*').eq('department', w.department).eq('is_active', true).order('sequence_order', { ascending: true });
+                const { data: instData } = await supabase.from('task_instances')
+                    .select('id, van_id, task_template_id, finished_at, started_at, active_work_minutes')
+                    .eq('worker_id', w.id).gte('created_at', todayStr() + 'T00:00:00');
+                const { data: reasons } = await supabase.from('pause_reasons').select('*').eq('is_active', true).order('sequence_order', { ascending: true });
                 const map = {};
                 (instData || []).forEach(i => { map[`${i.van_id}-${i.task_template_id}`] = i; });
-
-                setVans(vanData || []);
-                setDeptTasks(taskData || []);
-                setCompletions(map);
+                setVans(vanData || []); setDeptTasks(taskData || []); setCompletions(map); setPauseReasons(reasons || []);
             };
 
             const vanProgress = (vanId) => {
                 if (!deptTasks.length) return { done: 0, total: 0, pct: 0 };
                 let done = 0;
-                deptTasks.forEach(t => {
-                    const c = completions[`${vanId}-${t.id}`];
-                    if (c && c.finished_at) done++;
-                });
+                deptTasks.forEach(t => { const c = completions[`${vanId}-${t.id}`]; if (c && c.finished_at) done++; });
                 return { done, total: deptTasks.length, pct: Math.round((done / deptTasks.length) * 100) };
             };
 
@@ -188,8 +160,7 @@
                 try {
                     const { data, error } = await supabase.from('workers').select('*').eq('pin', pin).single();
                     if (error || !data) throw new Error();
-                    setWorker(data);
-                    setScreen('morning');
+                    setWorker(data); setScreen('morning');
                 } catch { alert('PIN not recognised. Please try again.'); }
                 setLoading(false);
             };
@@ -200,7 +171,7 @@
                 try {
                     await supabase.from('daily_signoffs').insert([{
                         worker_id: worker.id, signoff_date: todayStr(),
-                        ppe_acknowledged: true, whs_policy_acknowledged: true
+                        ppe_acknowledged: true, policy_acknowledged: true, signoff_time: nowIso()
                     }]);
                     await loadDashboard(worker);
                     setScreen('dashboard');
@@ -210,12 +181,11 @@
 
             const logout = () => {
                 clearInterval(tick.current);
-                setWorker(null); setPin(''); setScreen('login');
-                setPpe(false); setWhs(false);
-                setVans([]); setDeptTasks([]); setCompletions({});
-                setSelectedVan(null); setActiveTask(null); setActiveInstanceId(null);
-                setRunning(false); setElapsedSec(0); setPhotos([]); setSupPin('');
-                setPausedIssue(null); setOpenPauseLogId(null);
+                setWorker(null); setPin(''); setScreen('login'); setPpe(false); setWhs(false);
+                setVans([]); setDeptTasks([]); setCompletions({}); setSelectedVan(null);
+                setActiveTask(null); setActiveInstanceId(null); setStartedAt(null);
+                setBaseSec(0); setSegStart(null); setElapsedSec(0); setRunning(false);
+                setPhotos({}); setPreviews({}); setSupPin(''); setPausedIssue(null); setOpenPauseLogId(null);
             };
 
             const openChassis = (van) => { setSelectedVan(van); setScreen('chassis'); };
@@ -223,67 +193,69 @@
             const startTask = async (task) => {
                 setLoading(true);
                 try {
-                    const startIso = new Date().toISOString();
+                    const startIso = nowIso();
                     const { data, error } = await supabase.from('task_instances').insert([{
-                        worker_id: worker.id,
-                        van_id: selectedVan.id,
-                        task_template_id: task.id,
-                        started_at: startIso,
-                        signoff_status: 'pending',
-                        production_line: selectedVan.production_line
+                        worker_id: worker.id, van_id: selectedVan.id, task_template_id: task.id,
+                        started_at: startIso, signoff_status: 'pending', production_line: selectedVan.production_line
                     }]).select().single();
                     if (error) throw error;
-                    setActiveTask(task);
-                    setActiveInstanceId(data.id);
-                    setStartedAt(startIso);
-                    setElapsedSec(0);
-                    setRunning(true);
-                    setPausedIssue(null);
-                    setOpenPauseLogId(null);
-                    setScreen('active');
-                } catch (e) { alert('Could not start task.'); }
+                    setActiveTask(task); setActiveInstanceId(data.id); setStartedAt(startIso);
+                    setBaseSec(0); setSegStart(Date.now()); setElapsedSec(0); setRunning(true);
+                    setPausedIssue(null); setOpenPauseLogId(null); setScreen('active');
+                } catch { alert('Could not start task.'); }
                 setLoading(false);
+            };
+
+            // resume an in-progress task opened from the checklist
+            const resumeInProgress = (task, inst) => {
+                setActiveTask(task); setActiveInstanceId(inst.id); setStartedAt(inst.started_at);
+                setBaseSec(0); setSegStart(new Date(inst.started_at).getTime()); setRunning(true);
+                setPausedIssue(null); setOpenPauseLogId(null); setScreen('active');
             };
 
             const completeTask = async () => {
                 setLoading(true);
                 try {
-                    const mins = Math.max(0, Math.round(elapsedSec / 60));
+                    const activeSec = running && segStart ? baseSec + Math.floor((Date.now() - segStart) / 1000) : baseSec;
+                    const activeMin = Math.max(0, Math.round(activeSec / 60));
+                    const finishedIso = nowIso();
+                    const totalMin = startedAt ? Math.max(0, Math.round((Date.now() - new Date(startedAt).getTime()) / 60000)) : activeMin;
                     await supabase.from('task_instances').update({
-                        finished_at: new Date().toISOString(),
-                        total_elapsed_minutes: mins,
-                        active_work_minutes: mins,
-                        signoff_status: 'pending'
+                        finished_at: finishedIso, total_elapsed_minutes: totalMin,
+                        active_work_minutes: activeMin, signoff_status: 'pending'
                     }).eq('id', activeInstanceId);
-                    setRunning(false);
-                    setCompletions(prev => ({ ...prev, [`${selectedVan.id}-${activeTask.id}`]: { id: activeInstanceId, finished_at: new Date().toISOString() } }));
-                    setActiveTask(null); setActiveInstanceId(null); setElapsedSec(0);
+                    setRunning(false); clearInterval(tick.current);
+                    setCompletions(prev => ({ ...prev, [`${selectedVan.id}-${activeTask.id}`]: { id: activeInstanceId, finished_at: finishedIso, active_work_minutes: activeMin, started_at: startedAt } }));
+                    setActiveTask(null); setActiveInstanceId(null); setBaseSec(0); setSegStart(null); setElapsedSec(0);
                     setScreen('chassis');
                 } catch { alert('Could not complete task.'); }
                 setLoading(false);
             };
 
-            const openIssue = (mode) => { setIssueMode(mode); setIssueReason(null); setIssueNote(''); setScreen('issue'); setRunning(false); };
+            const openPause = () => {
+                // freeze active timer
+                const frozen = segStart ? baseSec + Math.floor((Date.now() - segStart) / 1000) : baseSec;
+                setBaseSec(frozen); setElapsedSec(frozen); setRunning(false); setSegStart(null);
+                setIssueReason(null); setIssueNote(''); setScreen('issue');
+            };
 
-            const submitIssue = async () => {
+            const submitPause = async () => {
                 if (!issueReason) { alert('Please choose a reason.'); return; }
                 setLoading(true);
                 try {
-                    const { data: reasons } = await supabase.from('pause_reasons').select('*');
-                    const match = (reasons || []).find(r =>
-                        (r.reason_name || r.reason || r.name || '').toLowerCase() === issueReason.toLowerCase());
+                    const match = pauseReasons.find(r => r.reason === issueReason);
                     const { data: log } = await supabase.from('pause_logs').insert([{
-                        task_instance_id: activeInstanceId,
-                        worker_id: worker.id,
-                        pause_reason_id: match ? match.id : null,
-                        pause_start: new Date().toISOString()
+                        task_instance_id: activeInstanceId, worker_id: worker.id,
+                        pause_reason_id: match ? match.id : null, pause_start: nowIso()
                     }]).select().single();
                     setOpenPauseLogId(log ? log.id : null);
-                    setPausedIssue({ reason: issueReason, note: issueNote, mode: issueMode });
+                    setPausedIssue({ reason: issueReason, note: issueNote });
+                    if (issueNote && activeInstanceId) {
+                        await supabase.from('task_instances').update({ notes: issueNote }).eq('id', activeInstanceId);
+                    }
                     setScreen('active');
                 } catch {
-                    setPausedIssue({ reason: issueReason, note: issueNote, mode: issueMode });
-                    setScreen('active');
+                    setPausedIssue({ reason: issueReason, note: issueNote }); setScreen('active');
                 }
                 setLoading(false);
             };
@@ -293,34 +265,66 @@
                     try {
                         const { data: log } = await supabase.from('pause_logs').select('pause_start').eq('id', openPauseLogId).single();
                         const mins = log ? Math.max(0, Math.round((Date.now() - new Date(log.pause_start).getTime()) / 60000)) : 0;
-                        await supabase.from('pause_logs').update({ pause_end: new Date().toISOString(), pause_minutes: mins }).eq('id', openPauseLogId);
+                        await supabase.from('pause_logs').update({ pause_end: nowIso(), pause_minutes: mins }).eq('id', openPauseLogId);
                     } catch {}
                 }
-                setOpenPauseLogId(null); setPausedIssue(null); setRunning(true);
+                setOpenPauseLogId(null); setPausedIssue(null);
+                setSegStart(Date.now()); setRunning(true);  // continue from frozen baseSec
             };
 
-            const finishDay = () => { setPhotos([]); setScreen('photos'); };
+            // ---- End of day: real photos ----
+            const finishDay = () => { setPhotos({}); setPreviews({}); setScreen('photos'); };
+
+            const pickPhoto = (angle) => { pendingAngle.current = angle; if (fileRef.current) { fileRef.current.value = ''; fileRef.current.click(); } };
+
+            const handleFile = async (e) => {
+                const file = e.target.files && e.target.files[0];
+                const angle = pendingAngle.current;
+                if (!file || !angle) return;
+                setUploadingAngle(angle);
+                setPreviews(prev => ({ ...prev, [angle]: URL.createObjectURL(file) }));
+                try {
+                    const path = `${worker.id}-${todayStr()}-${angle}-${Date.now()}.jpg`;
+                    const { error: upErr } = await supabase.storage.from('worker-photos').upload(path, file, { contentType: file.type || 'image/jpeg', upsert: true });
+                    if (upErr) throw upErr;
+                    const { data: pub } = supabase.storage.from('worker-photos').getPublicUrl(path);
+                    await supabase.from('daily_signoff_photos').insert([{
+                        worker_id: worker.id, signoff_date: todayStr(),
+                        photo_url: pub.publicUrl, photo_angle: angle, approval_status: 'pending'
+                    }]);
+                    setPhotos(prev => ({ ...prev, [angle]: pub.publicUrl }));
+                } catch (err) {
+                    alert('Photo upload failed for ' + angle + '. Please try again.');
+                    setPreviews(prev => { const n = { ...prev }; delete n[angle]; return n; });
+                }
+                setUploadingAngle(null);
+            };
+
+            const photoCount = Object.keys(photos).length;
             const submitPhotos = () => {
-                if (photos.length < 4) { alert('Please capture all 4 angles.'); return; }
+                if (photoCount < 4) { alert('Please capture all 4 photos.'); return; }
                 setScreen('supervisor');
             };
+
             const supervisorApprove = async () => {
                 setLoading(true);
                 try {
-                    const { data: sup } = await supabase.from('workers').select('*').eq('pin', supPin).single();
-                    if (!sup) throw new Error();
+                    const { data: sup, error } = await supabase.from('workers').select('*').eq('pin', supPin).single();
+                    if (error || !sup) { alert('PIN not recognised.'); setLoading(false); return; }
+                    if (sup.role !== 'supervisor') { alert('Only a supervisor can sign off. Please ask Gaya Sri, Udara or Dasun.'); setLoading(false); return; }
+                    const ts = nowIso();
                     await supabase.from('task_instances').update({
-                        signoff_status: 'approved',
-                        supervisor_signoff_id: sup.id,
-                        supervisor_signoff_at: new Date().toISOString()
+                        signoff_status: 'approved', supervisor_signoff_id: sup.id, supervisor_signoff_at: ts
                     }).eq('worker_id', worker.id).gte('created_at', todayStr() + 'T00:00:00').eq('signoff_status', 'pending');
-                    alert('Day signed off. Good work today.');
-                    logout();
-                } catch { alert('Supervisor PIN not recognised.'); setLoading(false); }
+                    await supabase.from('daily_signoff_photos').update({
+                        approval_status: 'approved', approved_by_supervisor_id: sup.id, supervisor_approved_at: ts
+                    }).eq('worker_id', worker.id).eq('signoff_date', todayStr());
+                    setScreen('done');
+                } catch { alert('Could not sign off. Please try again.'); }
+                setLoading(false);
             };
 
             // ================= SCREENS =================
-
             if (screen === 'login') {
                 return (
                     <div style={{ minHeight: '100vh', background: 'var(--ink)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
@@ -338,9 +342,8 @@
                                 <div className="cond" style={{ fontSize: 22, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Sign in</div>
                                 <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 20 }}>Enter your worker PIN to start.</div>
                                 <input type="tel" inputMode="numeric" value={pin} onChange={e => setPin(e.target.value)} placeholder="••••"
-                                    style={{ width: '100%', padding: '16px', fontSize: 26, textAlign: 'center', letterSpacing: '0.4em', border: '2px solid var(--line)', borderRadius: 12, marginBottom: 18, fontWeight: 700 }} />
-                                <button onClick={doLogin} disabled={loading || !pin}
-                                    style={{ width: '100%', padding: 16, background: 'var(--orange)', color: 'var(--ink)', border: 'none', borderRadius: 12, fontSize: 17, fontWeight: 700, cursor: 'pointer', opacity: (loading || !pin) ? 0.5 : 1 }}>
+                                    style={{ width: '100%', padding: 16, fontSize: 26, textAlign: 'center', letterSpacing: '0.4em', border: '2px solid var(--line)', borderRadius: 12, marginBottom: 18, fontWeight: 700 }} />
+                                <button onClick={doLogin} disabled={loading || !pin} style={{ width: '100%', padding: 16, background: 'var(--orange)', color: 'var(--ink)', border: 'none', borderRadius: 12, fontSize: 17, fontWeight: 700, cursor: 'pointer', opacity: (loading || !pin) ? 0.5 : 1 }}>
                                     {loading ? 'Checking…' : 'Sign in'}
                                 </button>
                             </div>
@@ -355,10 +358,7 @@
                         <div style={{ width: 26, height: 26, borderRadius: 7, border: `2px solid ${on ? 'var(--green)' : '#C7CCD4'}`, background: on ? 'var(--green)' : '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             {on && <span style={{ color: '#fff', fontWeight: 700, fontSize: 16 }}>✓</span>}
                         </div>
-                        <div>
-                            <div style={{ fontWeight: 700, fontSize: 16 }}>{title}</div>
-                            <div style={{ color: 'var(--muted)', fontSize: 14, marginTop: 2 }}>{desc}</div>
-                        </div>
+                        <div><div style={{ fontWeight: 700, fontSize: 16 }}>{title}</div><div style={{ color: 'var(--muted)', fontSize: 14, marginTop: 2 }}>{desc}</div></div>
                     </div>
                 );
                 return (
@@ -369,8 +369,7 @@
                             <div style={{ color: 'var(--muted)', marginBottom: 22 }}>Confirm your safety checks to start the day.</div>
                             <Check on={ppe} set={setPpe} title="PPE on" desc="Boots, hi-vis and eye protection where required." />
                             <Check on={whs} set={setWhs} title="WHS policy" desc="I will follow site safety procedures today." />
-                            <button onClick={doMorning} disabled={loading}
-                                style={{ width: '100%', padding: 16, marginTop: 8, background: (ppe && whs) ? 'var(--orange)' : '#D6D9DE', color: 'var(--ink)', border: 'none', borderRadius: 12, fontSize: 17, fontWeight: 700, cursor: 'pointer' }}>
+                            <button onClick={doMorning} disabled={loading} style={{ width: '100%', padding: 16, marginTop: 8, background: (ppe && whs) ? 'var(--orange)' : '#D6D9DE', color: 'var(--ink)', border: 'none', borderRadius: 12, fontSize: 17, fontWeight: 700, cursor: 'pointer' }}>
                                 {loading ? 'Saving…' : 'Start my day'}
                             </button>
                         </div>
@@ -388,14 +387,9 @@
                                 <div style={{ fontSize: 13, color: 'var(--muted)' }}>{vans.length} in progress</div>
                             </div>
                             <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 18 }}>Tap a chassis to see your {worker.department.toLowerCase()} tasks.</div>
-
-                            {vans.length === 0 && (
-                                <div style={{ background: 'var(--card)', borderRadius: 14, padding: 40, textAlign: 'center', color: 'var(--muted)' }}>No caravans in progress right now.</div>
-                            )}
-
+                            {vans.length === 0 && (<div style={{ background: 'var(--card)', borderRadius: 14, padding: 40, textAlign: 'center', color: 'var(--muted)' }}>No caravans in progress right now.</div>)}
                             {vans.map((v, i) => {
-                                const p = vanProgress(v.id);
-                                const complete = p.pct >= 100;
+                                const p = vanProgress(v.id); const complete = p.pct >= 100;
                                 return (
                                     <div key={v.id} onClick={() => openChassis(v)} className="tap fu" style={{ animationDelay: (i * 0.04) + 's', background: 'var(--card)', borderRadius: 14, padding: 18, marginBottom: 14, border: '1px solid var(--line)', cursor: 'pointer', boxShadow: '0 1px 2px rgba(20,25,35,0.04)' }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -406,24 +400,16 @@
                                                 </div>
                                                 <div style={{ color: 'var(--muted)', fontSize: 15, marginTop: 2 }}>{v.model}</div>
                                             </div>
-                                            <div style={{ textAlign: 'right' }}>
-                                                <div style={{ fontSize: 12, color: 'var(--muted)' }}>Due</div>
-                                                <div style={{ fontWeight: 700, fontSize: 15 }}>{fmtDate(v.target_completion_date)}</div>
-                                            </div>
+                                            <div style={{ textAlign: 'right' }}><div style={{ fontSize: 12, color: 'var(--muted)' }}>Due</div><div style={{ fontWeight: 700, fontSize: 15 }}>{fmtDate(v.target_completion_date)}</div></div>
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
                                             <div style={{ flex: 1 }}><Bar pct={p.pct} /></div>
-                                            <div style={{ fontSize: 13, fontWeight: 700, color: complete ? 'var(--green)' : 'var(--ink)', minWidth: 96, textAlign: 'right' }}>
-                                                {p.done}/{p.total} {worker.department.toLowerCase()}
-                                            </div>
+                                            <div style={{ fontSize: 13, fontWeight: 700, color: complete ? 'var(--green)' : 'var(--ink)', minWidth: 96, textAlign: 'right' }}>{p.done}/{p.total} {worker.department.toLowerCase()}</div>
                                         </div>
                                     </div>
                                 );
                             })}
-
-                            <button onClick={finishDay} style={{ width: '100%', padding: 16, marginTop: 8, background: 'var(--ink)', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>
-                                Finish my work for today
-                            </button>
+                            <button onClick={finishDay} style={{ width: '100%', padding: 16, marginTop: 8, background: 'var(--ink)', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Finish my work for today</button>
                         </div>
                     </div>
                 );
@@ -436,49 +422,37 @@
                         <TopBar worker={worker} onLogout={logout} sub={`${worker.department} tasks`} />
                         <div className="fu" style={{ maxWidth: 720, margin: '0 auto', padding: 20 }}>
                             <button onClick={() => setScreen('dashboard')} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 15, fontWeight: 600, cursor: 'pointer', padding: 0, marginBottom: 14 }}>‹ All caravans</button>
-
                             <div style={{ background: 'var(--ink)', color: '#fff', borderRadius: 14, padding: 18, marginBottom: 18 }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <div>
-                                        <span className="cond" style={{ fontSize: 30, fontWeight: 700 }}>{selectedVan.chassis_number}</span>
-                                        <div style={{ color: '#9AA1AD', fontSize: 15 }}>{selectedVan.model} · Line {selectedVan.production_line}</div>
-                                    </div>
-                                    <div style={{ textAlign: 'right' }}>
-                                        <div className="cond" style={{ fontSize: 30, fontWeight: 700, color: 'var(--orange)' }}>{p.pct}%</div>
-                                        <div style={{ color: '#9AA1AD', fontSize: 13 }}>{p.done} of {p.total} done</div>
-                                    </div>
+                                    <div><span className="cond" style={{ fontSize: 30, fontWeight: 700 }}>{selectedVan.chassis_number}</span><div style={{ color: '#9AA1AD', fontSize: 15 }}>{selectedVan.model} · Line {selectedVan.production_line}</div></div>
+                                    <div style={{ textAlign: 'right' }}><div className="cond" style={{ fontSize: 30, fontWeight: 700, color: 'var(--orange)' }}>{p.pct}%</div><div style={{ color: '#9AA1AD', fontSize: 13 }}>{p.done} of {p.total} done</div></div>
                                 </div>
                                 {selectedVan.notes && <div style={{ marginTop: 12, fontSize: 13, color: '#C9CED7', borderTop: '1px solid #353B47', paddingTop: 10 }}>Note: {selectedVan.notes}</div>}
                             </div>
-
                             <div className="cond" style={{ fontSize: 18, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 10 }}>{worker.department} checklist</div>
-
                             {deptTasks.map(t => {
                                 const c = completions[`${selectedVan.id}-${t.id}`];
                                 const done = c && c.finished_at;
                                 const inProgress = c && !c.finished_at;
+                                const st = done ? timeStatus(c.active_work_minutes || 0, t.allocated_minutes) : null;
                                 return (
-                                    <div key={t.id} className="tap" style={{ background: 'var(--card)', borderRadius: 12, padding: 16, marginBottom: 10, border: `1px solid ${done ? 'var(--green)' : inProgress ? 'var(--amber)' : 'var(--line)'}`, display: 'flex', alignItems: 'center', gap: 14, opacity: done ? 0.72 : 1 }}>
-                                        <StatusDot color={done ? 'var(--green)' : inProgress ? 'var(--amber)' : '#C7CCD4'} />
+                                    <div key={t.id} style={{ background: done ? '#FBFCFD' : 'var(--card)', borderRadius: 12, padding: 16, marginBottom: 10, border: `1px solid ${done ? (st.late ? '#F3C2C2' : 'var(--green)') : inProgress ? 'var(--amber)' : 'var(--line)'}`, display: 'flex', alignItems: 'center', gap: 14 }}>
+                                        <StatusDot color={done ? (st.late ? 'var(--red)' : 'var(--green)') : inProgress ? 'var(--amber)' : '#C7CCD4'} />
                                         <div style={{ flex: 1 }}>
-                                            <div style={{ fontWeight: 600, fontSize: 16, textDecoration: done ? 'line-through' : 'none', color: done ? 'var(--muted)' : 'var(--ink)' }}>{t.task_name}</div>
-                                            <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 2 }}>
-                                                {done ? 'Completed' : inProgress ? 'In progress' : `Target ${t.allocated_minutes} min`}
+                                            <div style={{ fontWeight: 600, fontSize: 16, color: done ? 'var(--muted)' : 'var(--ink)', textDecoration: done ? 'line-through' : 'none' }}>{t.task_name}</div>
+                                            <div style={{ fontSize: 13, color: done ? st.color : 'var(--muted)', marginTop: 2, fontWeight: done ? 600 : 400 }}>
+                                                {done ? st.label : inProgress ? 'In progress' : `Target ${t.allocated_minutes} min`}
                                             </div>
                                         </div>
-                                        {!done && (
-                                            <button onClick={() => inProgress ? (setActiveTask(t), setActiveInstanceId(c.id), setStartedAt(c.started_at), setRunning(true), setScreen('active')) : startTask(t)}
-                                                style={{ background: inProgress ? 'var(--amber)' : 'var(--orange)', color: 'var(--ink)', border: 'none', borderRadius: 9, padding: '10px 18px', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
-                                                {inProgress ? 'Resume' : 'Start'}
-                                            </button>
+                                        {done ? (
+                                            <span style={{ fontSize: 12, fontWeight: 700, color: st.late ? 'var(--red)' : 'var(--green)', background: st.late ? 'var(--red-bg)' : 'var(--green-bg)', borderRadius: 20, padding: '5px 12px' }}>{st.late ? 'Late' : 'Done'}</span>
+                                        ) : (
+                                            <button onClick={() => inProgress ? resumeInProgress(t, c) : startTask(t)} style={{ background: inProgress ? 'var(--amber)' : 'var(--orange)', color: 'var(--ink)', border: 'none', borderRadius: 9, padding: '10px 18px', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>{inProgress ? 'Resume' : 'Start'}</button>
                                         )}
                                     </div>
                                 );
                             })}
-
-                            <button onClick={finishDay} style={{ width: '100%', padding: 16, marginTop: 12, background: 'var(--ink)', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>
-                                Finish my work for today
-                            </button>
+                            <button onClick={finishDay} style={{ width: '100%', padding: 16, marginTop: 12, background: 'var(--ink)', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Finish my work for today</button>
                         </div>
                     </div>
                 );
@@ -495,51 +469,33 @@
                         <TopBar worker={worker} onLogout={logout} sub={`${selectedVan.chassis_number} · ${selectedVan.model}`} />
                         <div className="fu" style={{ maxWidth: 560, margin: '0 auto', padding: 20 }}>
                             <button onClick={() => { setRunning(false); setScreen('chassis'); }} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 15, fontWeight: 600, cursor: 'pointer', padding: 0, marginBottom: 14 }}>‹ Back to {selectedVan.chassis_number}</button>
-
                             <div style={{ fontSize: 13, color: 'var(--orange)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Current task</div>
                             <div className="cond" style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.1, marginBottom: 18 }}>{activeTask.task_name}</div>
-
                             {pausedIssue && (
-                                <div style={{ background: 'var(--red-bg)', border: '1px solid #F3C2C2', borderRadius: 12, padding: 14, marginBottom: 16 }}>
-                                    <div style={{ fontWeight: 700, color: 'var(--red)', fontSize: 14 }}>{pausedIssue.mode === 'help' ? 'Help requested' : 'Paused'}: {pausedIssue.reason}</div>
-                                    {pausedIssue.note && <div style={{ fontSize: 13, color: '#7A2E2E', marginTop: 4 }}>{pausedIssue.note}</div>}
+                                <div style={{ background: 'var(--amber-bg)', border: '1px solid #F0D38A', borderRadius: 12, padding: 14, marginBottom: 16 }}>
+                                    <div style={{ fontWeight: 700, color: '#8A6D1E', fontSize: 14 }}>Paused: {pausedIssue.reason}</div>
+                                    {pausedIssue.note && <div style={{ fontSize: 13, color: '#8A6D1E', marginTop: 4 }}>{pausedIssue.note}</div>}
                                 </div>
                             )}
-
                             <div style={{ background: 'var(--card)', borderRadius: 16, padding: 24, border: '1px solid var(--line)', marginBottom: 18 }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18 }}>
-                                    <div>
-                                        <div style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Started</div>
-                                        <div style={{ fontWeight: 700, fontSize: 18 }}>{startedAt ? fmtClock(startedAt) : '—'}</div>
-                                    </div>
-                                    <div style={{ textAlign: 'right' }}>
-                                        <div style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Target</div>
-                                        <div style={{ fontWeight: 700, fontSize: 18 }}>{activeTask.allocated_minutes} min</div>
-                                    </div>
+                                    <div><div style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Started</div><div style={{ fontWeight: 700, fontSize: 18 }}>{startedAt ? fmtClock(startedAt) : '—'}</div></div>
+                                    <div style={{ textAlign: 'right' }}><div style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Target</div><div style={{ fontWeight: 700, fontSize: 18 }}>{activeTask.allocated_minutes} min</div></div>
                                 </div>
                                 <div style={{ textAlign: 'center', padding: '10px 0' }}>
-                                    <div className="cond" style={{ fontSize: 64, fontWeight: 700, color: statusColor, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
-                                        {String(mm).padStart(2, '0')}:{String(ss).padStart(2, '0')}
-                                    </div>
+                                    <div className="cond" style={{ fontSize: 64, fontWeight: 700, color: statusColor, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{String(mm).padStart(2, '0')}:{String(ss).padStart(2, '0')}</div>
+                                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>active work time (pauses not counted)</div>
                                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginTop: 10, background: '#F1F3F5', borderRadius: 20, padding: '5px 14px' }}>
-                                        <StatusDot color={statusColor} />
-                                        <span style={{ fontWeight: 600, fontSize: 14, color: statusColor }}>{statusText}</span>
+                                        <StatusDot color={statusColor} /><span style={{ fontWeight: 600, fontSize: 14, color: statusColor }}>{statusText}</span>
                                     </div>
                                 </div>
                             </div>
-
                             {running ? (
-                                <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-                                    <button onClick={() => openIssue('pause')} style={{ flex: 1, padding: 16, background: 'var(--card)', color: 'var(--ink)', border: '2px solid var(--line)', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Pause</button>
-                                    <button onClick={() => openIssue('help')} style={{ flex: 1, padding: 16, background: 'var(--red-bg)', color: 'var(--red)', border: '2px solid #F3C2C2', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Need help</button>
-                                </div>
+                                <button onClick={openPause} style={{ width: '100%', padding: 16, marginBottom: 12, background: 'var(--card)', color: 'var(--ink)', border: '2px solid var(--line)', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Pause</button>
                             ) : (
                                 <button onClick={resumeTask} style={{ width: '100%', padding: 16, marginBottom: 12, background: 'var(--green)', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Resume task</button>
                             )}
-
-                            <button onClick={completeTask} disabled={loading} style={{ width: '100%', padding: 18, background: 'var(--orange)', color: 'var(--ink)', border: 'none', borderRadius: 12, fontSize: 18, fontWeight: 700, cursor: 'pointer' }}>
-                                {loading ? 'Saving…' : 'Complete task'}
-                            </button>
+                            <button onClick={completeTask} disabled={loading} style={{ width: '100%', padding: 18, background: 'var(--orange)', color: 'var(--ink)', border: 'none', borderRadius: 12, fontSize: 18, fontWeight: 700, cursor: 'pointer' }}>{loading ? 'Saving…' : 'Complete task'}</button>
                         </div>
                     </div>
                 );
@@ -550,25 +506,19 @@
                     <div style={{ minHeight: '100vh' }}>
                         <TopBar worker={worker} onLogout={logout} sub={`${selectedVan.chassis_number} · ${activeTask.task_name}`} />
                         <div className="fu" style={{ maxWidth: 560, margin: '0 auto', padding: 20 }}>
-                            <button onClick={() => { setRunning(true); setScreen('active'); }} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 15, fontWeight: 600, cursor: 'pointer', padding: 0, marginBottom: 14 }}>‹ Back to task</button>
-                            <div className="cond" style={{ fontSize: 26, fontWeight: 700, textTransform: 'uppercase' }}>{issueMode === 'help' ? 'Request help' : 'Why are you pausing?'}</div>
-                            <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 18 }}>Your supervisor sees this straight away.</div>
-
-                            {ISSUE_REASONS.map(r => (
-                                <div key={r} onClick={() => setIssueReason(r)} className="tap" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 15, marginBottom: 9, borderRadius: 11, border: `2px solid ${issueReason === r ? 'var(--orange)' : 'var(--line)'}`, background: issueReason === r ? '#FEF7EA' : 'var(--card)', cursor: 'pointer' }}>
-                                    <div style={{ width: 20, height: 20, borderRadius: 20, border: `2px solid ${issueReason === r ? 'var(--orange)' : '#C7CCD4'}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                        {issueReason === r && <div style={{ width: 10, height: 10, borderRadius: 10, background: 'var(--orange)' }} />}
+                            <button onClick={() => { setScreen('active'); }} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 15, fontWeight: 600, cursor: 'pointer', padding: 0, marginBottom: 14 }}>‹ Back to task</button>
+                            <div className="cond" style={{ fontSize: 26, fontWeight: 700, textTransform: 'uppercase' }}>Why are you pausing?</div>
+                            <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 18 }}>This is recorded so the supervisor can see what's holding up the line.</div>
+                            {pauseReasons.map(r => (
+                                <div key={r.id} onClick={() => setIssueReason(r.reason)} className="tap" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 15, marginBottom: 9, borderRadius: 11, border: `2px solid ${issueReason === r.reason ? 'var(--orange)' : 'var(--line)'}`, background: issueReason === r.reason ? '#FEF7EA' : 'var(--card)', cursor: 'pointer' }}>
+                                    <div style={{ width: 20, height: 20, borderRadius: 20, border: `2px solid ${issueReason === r.reason ? 'var(--orange)' : '#C7CCD4'}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                        {issueReason === r.reason && <div style={{ width: 10, height: 10, borderRadius: 10, background: 'var(--orange)' }} />}
                                     </div>
-                                    <span style={{ fontWeight: 600, fontSize: 16 }}>{r}</span>
+                                    <span style={{ fontWeight: 600, fontSize: 16 }}>{r.reason}</span>
                                 </div>
                             ))}
-
-                            <textarea value={issueNote} onChange={e => setIssueNote(e.target.value)} placeholder="Add a note (optional) — e.g. which part, which drawing…"
-                                style={{ width: '100%', padding: 14, fontSize: 15, border: '2px solid var(--line)', borderRadius: 11, minHeight: 80, marginTop: 8, marginBottom: 14, resize: 'none' }} />
-
-                            <button onClick={submitIssue} disabled={loading} style={{ width: '100%', padding: 16, background: 'var(--ink)', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>
-                                {loading ? 'Sending…' : issueMode === 'help' ? 'Send to supervisor' : 'Submit & pause'}
-                            </button>
+                            <textarea value={issueNote} onChange={e => setIssueNote(e.target.value)} placeholder="Add a note (optional) — e.g. which part, which drawing…" style={{ width: '100%', padding: 14, fontSize: 15, border: '2px solid var(--line)', borderRadius: 11, minHeight: 80, marginTop: 8, marginBottom: 14, resize: 'none' }} />
+                            <button onClick={submitPause} disabled={loading} style={{ width: '100%', padding: 16, background: 'var(--ink)', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>{loading ? 'Saving…' : 'Submit & pause'}</button>
                         </div>
                     </div>
                 );
@@ -579,24 +529,31 @@
                 return (
                     <div style={{ minHeight: '100vh' }}>
                         <TopBar worker={worker} onLogout={logout} sub="End of day" />
+                        <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handleFile} style={{ display: 'none' }} />
                         <div className="fu" style={{ maxWidth: 560, margin: '0 auto', padding: 20 }}>
                             <div className="cond" style={{ fontSize: 26, fontWeight: 700, textTransform: 'uppercase' }}>Capture your work</div>
-                            <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 20 }}>Take 4 photos of the chassis before sign-off.</div>
+                            <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 20 }}>Take 4 photos of the chassis. {photoCount} of 4 done.</div>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 18 }}>
-                                {angles.map(a => {
-                                    const taken = photos.includes(a);
+                                {angles.map((a, idx) => {
+                                    const taken = !!photos[a]; const busy = uploadingAngle === a; const prev = previews[a];
                                     return (
-                                        <button key={a} onClick={() => !taken && setPhotos([...photos, a])}
-                                            style={{ padding: '28px 12px', borderRadius: 14, border: `2px solid ${taken ? 'var(--green)' : 'var(--line)'}`, background: taken ? 'var(--green-bg)' : 'var(--card)', cursor: 'pointer', textAlign: 'center' }}>
-                                            <div className="cond" style={{ fontSize: 20, fontWeight: 700, color: taken ? 'var(--green)' : 'var(--ink)' }}>{taken ? '✓ ' : ''}{a}</div>
-                                            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{taken ? 'Captured' : 'Tap to capture'}</div>
-                                        </button>
+                                        <div key={a} onClick={() => !busy && pickPhoto(a)} className="tap" style={{ position: 'relative', borderRadius: 14, border: `2px solid ${taken ? 'var(--green)' : 'var(--line)'}`, background: taken ? 'var(--green-bg)' : 'var(--card)', cursor: 'pointer', overflow: 'hidden', minHeight: 130 }}>
+                                            {prev && <img src={prev} alt={a} style={{ width: '100%', height: 130, objectFit: 'cover' }} />}
+                                            {!prev && (
+                                                <div style={{ padding: '34px 12px', textAlign: 'center' }}>
+                                                    <div className="cond" style={{ fontSize: 20, fontWeight: 700 }}>{idx + 1} of 4</div>
+                                                    <div style={{ fontSize: 14, fontWeight: 600, marginTop: 2 }}>{a}</div>
+                                                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{busy ? 'Uploading…' : 'Tap to take photo'}</div>
+                                                </div>
+                                            )}
+                                            {taken && <div style={{ position: 'absolute', top: 8, right: 8, background: 'var(--green)', color: '#fff', borderRadius: 20, fontSize: 12, fontWeight: 700, padding: '3px 10px' }}>✓ {a}</div>}
+                                            {busy && <div style={{ position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: 'var(--ink)' }}>Uploading…</div>}
+                                        </div>
                                     );
                                 })}
                             </div>
-                            <button onClick={submitPhotos} disabled={photos.length < 4} style={{ width: '100%', padding: 16, background: photos.length === 4 ? 'var(--orange)' : '#D6D9DE', color: 'var(--ink)', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>
-                                Continue ({photos.length}/4)
-                            </button>
+                            <button onClick={submitPhotos} disabled={photoCount < 4} style={{ width: '100%', padding: 16, background: photoCount === 4 ? 'var(--orange)' : '#D6D9DE', color: 'var(--ink)', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Continue ({photoCount}/4)</button>
+                            <button onClick={() => setScreen('dashboard')} style={{ width: '100%', padding: 14, marginTop: 8, background: 'none', color: 'var(--muted)', border: 'none', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>‹ Back</button>
                         </div>
                     </div>
                 );
@@ -609,15 +566,28 @@
                         <div className="fu" style={{ maxWidth: 480, margin: '0 auto', padding: 20 }}>
                             <div style={{ background: 'var(--amber-bg)', border: '2px solid #F0D38A', borderRadius: 14, padding: 24, textAlign: 'center', marginBottom: 22 }}>
                                 <div className="cond" style={{ fontSize: 22, fontWeight: 700, textTransform: 'uppercase' }}>Awaiting supervisor sign-off</div>
-                                <div style={{ color: '#8A6D1E', fontSize: 14, marginTop: 6 }}>{worker.name}'s work for {fmtDate(todayStr())} is complete. Photos saved.</div>
+                                <div style={{ color: '#8A6D1E', fontSize: 14, marginTop: 6 }}>{worker.name}'s work for {fmtDate(todayStr())} is complete. 4 photos saved.</div>
                             </div>
-                            <div className="cond" style={{ fontSize: 16, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 10 }}>Supervisor PIN</div>
-                            <input type="tel" inputMode="numeric" value={supPin} onChange={e => setSupPin(e.target.value)} placeholder="••••"
-                                style={{ width: '100%', padding: 16, fontSize: 24, textAlign: 'center', letterSpacing: '0.4em', border: '2px solid var(--line)', borderRadius: 12, marginBottom: 16, fontWeight: 700 }} />
-                            <button onClick={supervisorApprove} disabled={loading || !supPin} style={{ width: '100%', padding: 16, background: 'var(--green)', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer', opacity: (loading || !supPin) ? 0.5 : 1 }}>
-                                {loading ? 'Signing off…' : 'Approve & sign off day'}
-                            </button>
+                            <div className="cond" style={{ fontSize: 16, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>Supervisor PIN</div>
+                            <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 10 }}>Only a supervisor can sign off (Gaya Sri, Udara or Dasun).</div>
+                            <input type="tel" inputMode="numeric" value={supPin} onChange={e => setSupPin(e.target.value)} placeholder="••••" style={{ width: '100%', padding: 16, fontSize: 24, textAlign: 'center', letterSpacing: '0.4em', border: '2px solid var(--line)', borderRadius: 12, marginBottom: 16, fontWeight: 700 }} />
+                            <button onClick={supervisorApprove} disabled={loading || !supPin} style={{ width: '100%', padding: 16, background: 'var(--green)', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer', opacity: (loading || !supPin) ? 0.5 : 1 }}>{loading ? 'Signing off…' : 'Approve & sign off day'}</button>
                             <button onClick={() => setScreen('photos')} style={{ width: '100%', padding: 14, marginTop: 10, background: 'none', color: 'var(--muted)', border: 'none', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>‹ Back to photos</button>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (screen === 'done') {
+                return (
+                    <div style={{ minHeight: '100vh', background: 'var(--ink)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+                        <div className="fu" style={{ textAlign: 'center', maxWidth: 420 }}>
+                            <div style={{ width: 84, height: 84, borderRadius: 84, background: 'var(--green)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px' }}>
+                                <span style={{ color: '#fff', fontSize: 48, fontWeight: 700 }}>✓</span>
+                            </div>
+                            <div className="cond" style={{ color: '#fff', fontSize: 34, fontWeight: 700, textTransform: 'uppercase', lineHeight: 1.1 }}>Thank you, {worker.name.split(' ')[0]}</div>
+                            <div style={{ color: '#9AA1AD', fontSize: 16, marginTop: 12, marginBottom: 30 }}>Your work for {fmtDate(todayStr())} has been signed off. Have a good evening.</div>
+                            <button onClick={logout} style={{ padding: '14px 40px', background: 'var(--orange)', color: 'var(--ink)', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Finish</button>
                         </div>
                     </div>
                 );
