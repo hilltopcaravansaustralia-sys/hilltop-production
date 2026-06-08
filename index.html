@@ -234,13 +234,99 @@
                 setScreen('pause-reason');
             };
 
-            const confirmPause = (reason) => {
+            const confirmPause = async (reason) => {
                 setPauseReason(reason);
                 setScreen('task-detail');
+                
+                // Save pause to database
+                if (activeTask) {
+                    try {
+                        // First, find or create a task_instance for this task if one doesn't exist
+                        const { data: existingInstance } = await supabase
+                            .from('task_instances')
+                            .select('id')
+                            .eq('worker_id', worker.id)
+                            .eq('task_template_id', activeTask.id)
+                            .order('created_at', { ascending: false })
+                            .limit(1);
+                        
+                        let taskInstanceId;
+                        if (existingInstance && existingInstance.length > 0) {
+                            taskInstanceId = existingInstance[0].id;
+                        } else {
+                            // Create a new task instance
+                            const { data: newInstance } = await supabase
+                                .from('task_instances')
+                                .insert([{
+                                    worker_id: worker.id,
+                                    van_id: 1,
+                                    task_template_id: activeTask.id,
+                                    started_at: new Date().toISOString(),
+                                    total_elapsed_minutes: 0,
+                                    active_work_minutes: 0,
+                                    signoff_status: 'pending'
+                                }])
+                                .select('id');
+                            taskInstanceId = newInstance[0].id;
+                        }
+                        
+                        // Get pause reason ID
+                        const { data: reasonData } = await supabase
+                            .from('pause_reasons')
+                            .select('id')
+                            .eq('reason', reason)
+                            .single();
+                        
+                        if (reasonData) {
+                            // Save pause log
+                            await supabase.from('pause_logs').insert([{
+                                task_instance_id: taskInstanceId,
+                                worker_id: worker.id,
+                                pause_reason_id: reasonData.id,
+                                pause_start: new Date().toISOString(),
+                                pause_minutes: 0
+                            }]);
+                            console.log('✅ Pause saved to database:', reason);
+                        }
+                    } catch (err) {
+                        console.error('Error saving pause:', err);
+                    }
+                }
             };
 
-            const handleResume = () => {
+            const handleResume = async () => {
                 setIsPaused(false);
+                
+                // Update pause_logs with resume time
+                if (activeTask && pauseReason) {
+                    try {
+                        // Get the most recent pause_log for this worker
+                        const { data: pauseLogs } = await supabase
+                            .from('pause_logs')
+                            .select('id, pause_start')
+                            .eq('worker_id', worker.id)
+                            .order('created_at', { ascending: false })
+                            .limit(1);
+                        
+                        if (pauseLogs && pauseLogs.length > 0) {
+                            const pauseStart = new Date(pauseLogs[0].pause_start);
+                            const pauseEnd = new Date();
+                            const pauseMinutes = Math.round((pauseEnd - pauseStart) / 60000);
+                            
+                            await supabase
+                                .from('pause_logs')
+                                .update({
+                                    pause_end: pauseEnd.toISOString(),
+                                    pause_minutes: pauseMinutes
+                                })
+                                .eq('id', pauseLogs[0].id);
+                            
+                            console.log('✅ Resume saved to database, pause duration:', pauseMinutes, 'minutes');
+                        }
+                    } catch (err) {
+                        console.error('Error saving resume:', err);
+                    }
+                }
             };
 
             const finishTask = async () => {
