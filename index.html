@@ -48,6 +48,13 @@
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5Y2R2eWF4bGRqZmlibmNudnNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MjY4NzcsImV4cCI6MjA5NjQwMjg3N30.RkI9yVJCMirdXUenl_fGUI5WiQr8n9TyToadiRCwkmI';
         const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+        // Which stations each worker sees (pilot mapping). Not listed = sees all department tasks.
+        const STATIONS_BY_PIN = {
+            '1001': ['Shared', 'Vinyl & finish'],  // Gaya Sri
+            '1002': ['Shared', 'Wiring'],          // Tharinda
+            '1003': ['Shared', 'Floor']            // New Worker
+        };
+
         const todayStr = () => new Date().toISOString().split('T')[0];
         const nowIso = () => new Date().toISOString();
         const fmtClock = (d) => new Date(d).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
@@ -144,11 +151,15 @@
                 setVans(vanData || []); setDeptTasks(taskData || []); setCompletions(map); setPauseReasons(reasons || []);
             };
 
+            const myStations = worker && STATIONS_BY_PIN[worker.pin] ? STATIONS_BY_PIN[worker.pin] : null;
+            const myTasks = myStations ? deptTasks.filter(t => myStations.includes(t.station)) : deptTasks;
+            const myLabel = myStations ? (myStations.filter(s => s !== 'Shared')[0] || (worker ? worker.department : '')) : (worker ? worker.department : '');
+
             const vanProgress = (vanId) => {
-                if (!deptTasks.length) return { done: 0, total: 0, pct: 0 };
+                if (!myTasks.length) return { done: 0, total: 0, pct: 0 };
                 let done = 0;
-                deptTasks.forEach(t => { const c = completions[`${vanId}-${t.id}`]; if (c && c.finished_at) done++; });
-                return { done, total: deptTasks.length, pct: Math.round((done / deptTasks.length) * 100) };
+                myTasks.forEach(t => { const c = completions[`${vanId}-${t.id}`]; if (c && c.finished_at) done++; });
+                return { done, total: myTasks.length, pct: Math.round((done / myTasks.length) * 100) };
             };
 
             const doLogin = async () => {
@@ -335,7 +346,7 @@
                                 <button onClick={doLogin} disabled={loading || !pin} style={{ width: '100%', padding: 16, background: 'var(--orange)', color: 'var(--ink)', border: 'none', borderRadius: 12, fontSize: 17, fontWeight: 700, cursor: 'pointer', opacity: (loading || !pin) ? 0.5 : 1 }}>
                                     {loading ? 'Checking…' : 'Sign in'}
                                 </button>
-                                <div style={{ textAlign: 'center', marginTop: 14, fontSize: 11, color: '#B6BBC4', letterSpacing: '0.05em' }}>BUILD 2.2 · CHASSIS</div>
+                                <div style={{ textAlign: 'center', marginTop: 14, fontSize: 11, color: '#B6BBC4', letterSpacing: '0.05em' }}>BUILD 2.3 · STATIONS</div>
                             </div>
                         </div>
                     </div>
@@ -394,7 +405,7 @@
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
                                             <div style={{ flex: 1 }}><Bar pct={p.pct} /></div>
-                                            <div style={{ fontSize: 13, fontWeight: 700, color: complete ? 'var(--green)' : 'var(--ink)', minWidth: 96, textAlign: 'right' }}>{p.done}/{p.total} {worker.department.toLowerCase()}</div>
+                                            <div style={{ fontSize: 13, fontWeight: 700, color: complete ? 'var(--green)' : 'var(--ink)', minWidth: 96, textAlign: 'right' }}>{p.done}/{p.total} {myLabel.toLowerCase()}</div>
                                         </div>
                                     </div>
                                 );
@@ -419,8 +430,8 @@
                                 </div>
                                 {selectedVan.notes && <div style={{ marginTop: 12, fontSize: 13, color: '#C9CED7', borderTop: '1px solid #353B47', paddingTop: 10 }}>Note: {selectedVan.notes}</div>}
                             </div>
-                            <div className="cond" style={{ fontSize: 18, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 10 }}>{worker.department} checklist</div>
-                            {deptTasks.map(t => {
+                            <div className="cond" style={{ fontSize: 18, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 10 }}>{myLabel} checklist</div>
+                            {myTasks.map(t => {
                                 const c = completions[`${selectedVan.id}-${t.id}`];
                                 const done = c && c.finished_at;
                                 const inProgress = c && !c.finished_at;
