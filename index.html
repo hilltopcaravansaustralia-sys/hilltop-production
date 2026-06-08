@@ -4,17 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hilltop Production System</title>
-    <meta name="theme-color" content="#0093a7" />
-    <meta name="description" content="Hilltop Caravans Production Management System" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Hilltop Production" />
-    <link rel="manifest" href="manifest.json" />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%230093a7' width='192' height='192'/><text x='96' y='120' font-size='80' font-weight='bold' fill='white' text-anchor='middle' dominant-baseline='middle'>HC</text></svg>" />
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         * {
             margin: 0;
@@ -28,22 +22,13 @@
         #root {
             min-height: 100vh;
         }
-        video {
-            width: 100%;
-            max-width: 600px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
-        canvas {
-            display: none;
-        }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect } = React;
         const { createClient } = window.supabase;
 
         // Supabase setup
@@ -60,17 +45,15 @@
             const [signoffPolicy, setSignoffPolicy] = useState(false);
             const [loading, setLoading] = useState(false);
             const [tasks, setTasks] = useState([]);
+            const [currentWorkDay, setCurrentWorkDay] = useState(1);
+            const [allTasksTemplate, setAllTasksTemplate] = useState([]);
             const [activeTask, setActiveTask] = useState(null);
             const [timer, setTimer] = useState(0);
             const [isRunning, setIsRunning] = useState(false);
-            const [isPaused, setIsPaused] = useState(false);
             const [pauseReason, setPauseReason] = useState(null);
-            const [completedTaskIds, setCompletedTaskIds] = useState([]);
-            const [completedTaskDetails, setCompletedTaskDetails] = useState([]);
-            const [todayDate, setTodayDate] = useState(new Date().toISOString().split('T')[0]);
             const [photos, setPhotos] = useState([]);
-            const videoRef = useRef(null);
-            const canvasRef = useRef(null);
+            const [supervisorPin, setSupervisorPin] = useState('');
+            const [rejectionReason, setRejectionReason] = useState('');
 
             const HILLTOP_COLORS = {
                 orange: '#F5A623',
@@ -90,111 +73,16 @@
                 'Helping another worker', 'Other'
             ];
 
-            const PHOTO_ANGLES = ['Front', 'Left', 'Right', 'Back'];
-
             // Timer effect
             useEffect(() => {
                 let interval;
-                if (isRunning && !isPaused) {
+                if (isRunning) {
                     interval = setInterval(() => {
                         setTimer(prev => prev + 1);
                     }, 1000);
                 }
                 return () => clearInterval(interval);
-            }, [isRunning, isPaused]);
-
-            // Start camera when photos screen loads
-            useEffect(() => {
-                if (screen === 'end-of-day-photos') {
-                    startCamera();
-                }
-                return () => {
-                    if (videoRef.current && videoRef.current.srcObject) {
-                        videoRef.current.srcObject.getTracks().forEach(track => track.stop());
-                    }
-                };
-            }, [screen]);
-
-            const startCamera = async () => {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: 'environment' }
-                    });
-                    if (videoRef.current) {
-                        videoRef.current.srcObject = stream;
-                    }
-                } catch (err) {
-                    alert('Camera access denied. Please allow camera access.');
-                }
-            };
-
-            const capturePhoto = (angle) => {
-                const video = videoRef.current;
-                const canvas = canvasRef.current;
-                if (video && canvas) {
-                    const ctx = canvas.getContext('2d');
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                    ctx.drawImage(video, 0, 0);
-                    const photoData = canvas.toDataURL('image/jpeg');
-                    setPhotos([...photos, { angle, data: photoData }]);
-                }
-            };
-
-            const uploadPhotos = async () => {
-                if (photos.length < 4) {
-                    alert('Please take all 4 photos');
-                    return;
-                }
-                setLoading(true);
-                try {
-                    // Upload each photo to Supabase storage
-                    for (let i = 0; i < photos.length; i++) {
-                        const photo = photos[i];
-                        const timestamp = new Date().getTime();
-                        const fileName = `${worker.id}-${timestamp}-${photo.angle}.jpg`;
-                        
-                        try {
-                            // Convert base64 to blob
-                            const base64data = photo.data.split(',')[1];
-                            const binaryString = atob(base64data);
-                            const bytes = new Uint8Array(binaryString.length);
-                            for (let j = 0; j < binaryString.length; j++) {
-                                bytes[j] = binaryString.charCodeAt(j);
-                            }
-                            const blob = new Blob([bytes], { type: 'image/jpeg' });
-                            
-                            console.log(`📷 Uploading ${photo.angle}: ${fileName}, Size: ${blob.size} bytes`);
-                            
-                            const { data, error } = await supabase.storage
-                                .from('worker-photos')
-                                .upload(fileName, blob, {
-                                    contentType: 'image/jpeg',
-                                    upsert: false
-                                });
-                            
-                            if (error) {
-                                console.error(`❌ Upload error for ${photo.angle}:`, error);
-                                throw new Error(`${photo.angle}: ${error.message}`);
-                            }
-                            
-                            console.log(`✅ ${photo.angle} uploaded:`, data);
-                        } catch (photoErr) {
-                            console.error(`Error uploading ${photo.angle}:`, photoErr);
-                            throw photoErr;
-                        }
-                    }
-
-                    console.log('✅ All photos uploaded successfully!');
-                    alert('✓ Photos uploaded successfully!');
-                    setPhotos([]);
-                    setScreen('task-list');
-                } catch (err) {
-                    console.error('Upload failed:', err);
-                    alert('Error uploading photos: ' + err.message);
-                }
-                setLoading(false);
-            };
+            }, [isRunning]);
 
             const handleLogin = async () => {
                 setLoading(true);
@@ -221,178 +109,106 @@
                 }
                 setLoading(true);
                 try {
-                    const today = new Date().toISOString().split('T')[0];
-                    
-                    // Check if this is a NEW day (different from stored todayDate)
-                    const isNewDay = todayDate !== today;
-                    
-                    if (isNewDay) {
-                        console.log('📅 New day detected! Clearing yesterday\'s session data.');
-                        // It's a new day - clear completed tasks from yesterday
-                        setCompletedTaskIds([]);
-                        setCompletedTaskDetails([]);
-                    }
-                    
-                    setTodayDate(today);
-                    
                     await supabase.from('daily_signoffs').insert([{
                         worker_id: worker.id,
-                        signoff_date: today,
+                        signoff_date: new Date().toISOString().split('T')[0],
                         ppe_acknowledged: true,
                         whs_policy_acknowledged: true
                     }]);
                     
-                    // Fetch all tasks for this department (no sequence requirement)
+                    // Load ALL tasks for this department (will filter by work_day in task-list)
                     const { data: tasksData } = await supabase
                         .from('tasks_template')
                         .select('*')
                         .eq('department', worker.department)
                         .order('sequence_order', { ascending: true });
                     
-                    // Fetch completed tasks for TODAY ONLY
-                    const { data: completedData } = await supabase
-                        .from('task_instances')
-                        .select('id, task_template_id, started_at, finished_at, total_elapsed_minutes')
-                        .eq('worker_id', worker.id)
-                        .gte('created_at', today + 'T00:00:00')
-                        .lte('created_at', today + 'T23:59:59');
+                    setAllTasksTemplate(tasksData || []);
                     
-                    // Extract completed task IDs for today only
-                    const completedIds = (completedData || []).map(t => t.task_template_id);
-                    setCompletedTaskIds(completedIds);
-                    setCompletedTaskDetails(completedData || []);
-                    
-                    // Filter out completed tasks
-                    const incompleteTasks = (tasksData || []).filter(t => !completedIds.includes(t.id));
-                    setTasks(incompleteTasks);
+                    // Filter to show only Day 1 tasks
+                    const dayTasks = (tasksData || []).filter(t => t.work_day === currentWorkDay);
+                    setTasks(dayTasks);
                     setScreen('task-list');
-                    
-                    console.log('✅ Sign-off complete. Tasks loaded for today.');
                 } catch (err) {
-                    alert('Error during sign-off: ' + err.message);
-                    console.error(err);
+                    alert('Error during sign-off');
                 }
                 setLoading(false);
             };
 
-            const selectTask = (task) => {
+            const checkAndAdvanceDay = async (completedTaskId) => {
+                // Check if all tasks for current work_day are now complete
+                const dayTasks = allTasksTemplate.filter(t => t.work_day === currentWorkDay);
+                
+                // Count how many of these tasks have been completed
+                const { data: completedTasks } = await supabase
+                    .from('task_instances')
+                    .select('task_template_id')
+                    .eq('worker_id', worker.id)
+                    .in('task_template_id', dayTasks.map(t => t.id))
+                    .eq('signoff_status', 'approved');
+                
+                const completedIds = (completedTasks || []).map(t => t.task_template_id);
+                const allDayTasksComplete = dayTasks.every(t => completedIds.includes(t.id));
+                
+                if (allDayTasksComplete) {
+                    // Advance to next work_day
+                    const nextDay = currentWorkDay + 1;
+                    const nextDayTasks = allTasksTemplate.filter(t => t.work_day === nextDay);
+                    
+                    if (nextDayTasks.length > 0) {
+                        setCurrentWorkDay(nextDay);
+                        setTasks(nextDayTasks);
+                        alert(`✓ Day ${currentWorkDay} Complete! Moving to Day ${nextDay}`);
+                    } else {
+                        alert('✓ All work complete for today!');
+                        setTasks([]);
+                    }
+                }
+            };
+
+            const startTask = (task) => {
                 setActiveTask(task);
                 setTimer(0);
-                setIsRunning(false);
-                setIsPaused(false);
+                setIsRunning(true);
                 setPauseReason(null);
                 setScreen('task-detail');
             };
 
-            const handleStart = () => {
-                setIsRunning(true);
-                setIsPaused(false);
-            };
-
             const handlePause = () => {
-                setIsPaused(true);
+                setIsRunning(false);
                 setScreen('pause-reason');
             };
 
-            const confirmPause = async (reason) => {
+            const confirmPause = (reason) => {
                 setPauseReason(reason);
                 setScreen('task-detail');
-                
-                // Save pause to database
-                if (activeTask) {
-                    try {
-                        // First, find or create a task_instance for this task if one doesn't exist
-                        const { data: existingInstance } = await supabase
-                            .from('task_instances')
-                            .select('id')
-                            .eq('worker_id', worker.id)
-                            .eq('task_template_id', activeTask.id)
-                            .order('created_at', { ascending: false })
-                            .limit(1);
-                        
-                        let taskInstanceId;
-                        if (existingInstance && existingInstance.length > 0) {
-                            taskInstanceId = existingInstance[0].id;
-                        } else {
-                            // Create a new task instance
-                            const { data: newInstance } = await supabase
-                                .from('task_instances')
-                                .insert([{
-                                    worker_id: worker.id,
-                                    van_id: 1,
-                                    task_template_id: activeTask.id,
-                                    started_at: new Date().toISOString(),
-                                    total_elapsed_minutes: 0,
-                                    active_work_minutes: 0,
-                                    signoff_status: 'pending'
-                                }])
-                                .select('id');
-                            taskInstanceId = newInstance[0].id;
-                        }
-                        
-                        // Get pause reason ID
-                        const { data: reasonData } = await supabase
-                            .from('pause_reasons')
-                            .select('id')
-                            .eq('reason', reason)
-                            .single();
-                        
-                        if (reasonData) {
-                            // Save pause log
-                            await supabase.from('pause_logs').insert([{
-                                task_instance_id: taskInstanceId,
-                                worker_id: worker.id,
-                                pause_reason_id: reasonData.id,
-                                pause_start: new Date().toISOString(),
-                                pause_minutes: 0
-                            }]);
-                            console.log('✅ Pause saved to database:', reason);
-                        }
-                    } catch (err) {
-                        console.error('Error saving pause:', err);
-                    }
-                }
             };
 
-            const handleResume = async () => {
-                setIsPaused(false);
-                
-                // Update pause_logs with resume time
-                if (activeTask && pauseReason) {
-                    try {
-                        // Get the most recent pause_log for this worker
-                        const { data: pauseLogs } = await supabase
-                            .from('pause_logs')
-                            .select('id, pause_start')
-                            .eq('worker_id', worker.id)
-                            .order('created_at', { ascending: false })
-                            .limit(1);
-                        
-                        if (pauseLogs && pauseLogs.length > 0) {
-                            const pauseStart = new Date(pauseLogs[0].pause_start);
-                            const pauseEnd = new Date();
-                            const pauseMinutes = Math.round((pauseEnd - pauseStart) / 60000);
-                            
-                            await supabase
-                                .from('pause_logs')
-                                .update({
-                                    pause_end: pauseEnd.toISOString(),
-                                    pause_minutes: pauseMinutes
-                                })
-                                .eq('id', pauseLogs[0].id);
-                            
-                            console.log('✅ Resume saved to database, pause duration:', pauseMinutes, 'minutes');
-                        }
-                    } catch (err) {
-                        console.error('Error saving resume:', err);
-                    }
-                }
+            const finishTask = () => {
+                setIsRunning(false);
+                setScreen('photos');
             };
 
-            const finishTask = async () => {
+            const uploadPhotos = async () => {
+                if (photos.length < 4) {
+                    alert('Please take all 4 photos');
+                    return;
+                }
+                setScreen('supervisor-signoff');
+            };
+
+            const supervisorApprove = async () => {
                 setLoading(true);
                 try {
-                    const { data: newInstance } = await supabase.from('task_instances').insert([{
+                    const { data: supervisor } = await supabase
+                        .from('workers')
+                        .select('*')
+                        .eq('pin', supervisorPin)
+                        .single();
+
+                    if (!supervisor) throw new Error('Invalid supervisor PIN');
+
+                    await supabase.from('task_instances').insert([{
                         worker_id: worker.id,
                         van_id: 1,
                         task_template_id: activeTask.id,
@@ -400,40 +216,63 @@
                         finished_at: new Date().toISOString(),
                         total_elapsed_minutes: Math.floor(timer / 60),
                         active_work_minutes: Math.floor(timer / 60),
-                        signoff_status: 'pending'
-                    }]).select();
-
-                    // Update completed task tracking
-                    const newCompletedIds = [...completedTaskIds, activeTask.id];
-                    setCompletedTaskIds(newCompletedIds);
-                    setCompletedTaskDetails([...completedTaskDetails, {
-                        id: newInstance[0]?.id,
-                        task_template_id: activeTask.id,
-                        total_elapsed_minutes: Math.floor(timer / 60)
+                        signoff_status: 'approved',
+                        supervisor_signoff_id: supervisor.id,
+                        supervisor_signoff_at: new Date().toISOString()
                     }]);
+
+                    alert('Task approved!');
+                    setSupervisorPin('');
+                    setRejectionReason('');
+                    setPhotos([]);
                     
-                    // Remove from incomplete tasks
-                    setTasks(tasks.filter(t => t.id !== activeTask.id));
+                    // Check if day is complete and advance
+                    await checkAndAdvanceDay(activeTask.id);
                     
-                    console.log('✅ Task completed:', activeTask.task_name);
-                    
-                    // Check if this is the last task (Clean workplace and bins)
-                    const isLastTask = activeTask.task_name && activeTask.task_name.toLowerCase().includes('clean workplace');
-                    
-                    setActiveTask(null);
-                    setTimer(0);
-                    setIsRunning(false);
-                    setIsPaused(false);
-                    setPauseReason(null);
-                    
-                    if (isLastTask) {
-                        setScreen('end-of-day-photos');
-                    } else {
-                        setScreen('task-list');
-                    }
+                    setScreen('task-list');
                 } catch (err) {
-                    console.error('Error saving task:', err);
-                    alert('Error saving task: ' + err.message);
+                    alert('Supervisor PIN invalid');
+                }
+                setLoading(false);
+            };
+
+            const supervisorReject = async () => {
+                if (!rejectionReason) {
+                    alert('Please provide rejection reason');
+                    return;
+                }
+                setLoading(true);
+                try {
+                    const { data: supervisor } = await supabase
+                        .from('workers')
+                        .select('*')
+                        .eq('pin', supervisorPin)
+                        .single();
+
+                    if (!supervisor) throw new Error('Invalid supervisor PIN');
+
+                    await supabase.from('task_instances').insert([{
+                        worker_id: worker.id,
+                        van_id: 1,
+                        task_template_id: activeTask.id,
+                        started_at: new Date().toISOString(),
+                        finished_at: new Date().toISOString(),
+                        total_elapsed_minutes: Math.floor(timer / 60),
+                        active_work_minutes: Math.floor(timer / 60),
+                        signoff_status: 'rejected',
+                        supervisor_signoff_id: supervisor.id,
+                        supervisor_signoff_at: new Date().toISOString(),
+                        rejection_reason: rejectionReason,
+                        rejection_count: 1
+                    }]);
+
+                    alert('Task rejected. Worker needs to redo.');
+                    setSupervisorPin('');
+                    setRejectionReason('');
+                    setPhotos([]);
+                    setScreen('task-list');
+                } catch (err) {
+                    alert('Supervisor PIN invalid');
                 }
                 setLoading(false);
             };
@@ -443,9 +282,9 @@
                 setScreen('login');
                 setPinInput('');
                 setTasks([]);
-                setCompletedTaskIds([]);
-                setCompletedTaskDetails([]);
                 setPhotos([]);
+                setCurrentWorkDay(1);
+                setAllTasksTemplate([]);
             };
 
             // LOGIN SCREEN
@@ -505,6 +344,9 @@
                             >
                                 {loading ? 'Loading...' : 'Login'}
                             </button>
+                            <p style={{ fontSize: '12px', color: '#999', marginTop: '20px', textAlign: 'center' }}>
+                                Test PINs: 1001 (Gaya), 1002 (Tharinda), 2001 (Ruwan), 7777 (Dasun)
+                            </p>
                         </div>
                     </div>
                 );
@@ -520,12 +362,22 @@
                                 <p style={{ color: '#666', marginBottom: '30px' }}>Daily safety acknowledgement</p>
                                 
                                 <label style={{ display: 'flex', alignItems: 'center', marginBottom: '20px', cursor: 'pointer' }}>
-                                    <input type="checkbox" checked={signoffPPE} onChange={(e) => setSignoffPPE(e.target.checked)} style={{ marginRight: '10px', width: '18px', height: '18px' }} />
+                                    <input
+                                        type="checkbox"
+                                        checked={signoffPPE}
+                                        onChange={(e) => setSignoffPPE(e.target.checked)}
+                                        style={{ marginRight: '10px', width: '18px', height: '18px' }}
+                                    />
                                     <span style={{ fontSize: '16px' }}>✅ I have PPE and it fits correctly</span>
                                 </label>
                                 
                                 <label style={{ display: 'flex', alignItems: 'center', marginBottom: '30px', cursor: 'pointer' }}>
-                                    <input type="checkbox" checked={signoffPolicy} onChange={(e) => setSignoffPolicy(e.target.checked)} style={{ marginRight: '10px', width: '18px', height: '18px' }} />
+                                    <input
+                                        type="checkbox"
+                                        checked={signoffPolicy}
+                                        onChange={(e) => setSignoffPolicy(e.target.checked)}
+                                        style={{ marginRight: '10px', width: '18px', height: '18px' }}
+                                    />
                                     <span style={{ fontSize: '16px' }}>✅ I agree to Hilltop WHS policy</span>
                                 </label>
 
@@ -554,136 +406,65 @@
 
             // TASK LIST
             if (screen === 'task-list') {
-                const totalTasks = tasks.length + completedTaskIds.length;
-                const completedCount = completedTaskIds.length;
-                const percentComplete = totalTasks > 0 ? Math.round((completedCount / totalTasks) * 100) : 0;
-                const percentRemaining = 100 - percentComplete;
-                
-                // Calculate remaining time from incomplete tasks
-                const remainingMinutes = tasks.reduce((sum, t) => sum + (t.allocated_minutes || 0), 0);
-                
-                // Check if "Clean workplace and bins" is completed
-                const cleanWorkplaceTask = completedTaskDetails.find(t => {
-                    // We need to check against task names in our tasks array
-                    const taskName = tasks.find(task => task.id === completedTaskIds[completedTaskDetails.indexOf(t)])?.task_name || '';
-                    return taskName.toLowerCase().includes('clean workplace');
-                });
-                const isCleanTaskCompleted = completedTaskIds.some(id => {
-                    const task = tasks.length === 0 ? null : null; // We need all tasks
-                    // Search in completed details
-                    return false; // Will update with proper check
-                });
-                
-                // Better approach - check if any completed task has "clean" in its historical data
-                const allTasksForDept = [...tasks]; // This needs to be all tasks including completed
-                
                 return (
                     <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
                         <div style={{ maxWidth: '600px', margin: '0 auto' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                                <h2 style={{ color: HILLTOP_COLORS.charcoal }}>Tasks for Today</h2>
-                                <button onClick={logout} style={{ padding: '8px 16px', background: HILLTOP_COLORS.red, color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '14px' }}>
+                                <h2 style={{ color: HILLTOP_COLORS.charcoal }}>
+                                    Day {currentWorkDay} Tasks 
+                                    <span style={{ fontSize: '14px', color: '#999', marginLeft: '8px' }}>
+                                        ({tasks.length} remaining)
+                                    </span>
+                                </h2>
+                                <button
+                                    onClick={logout}
+                                    style={{
+                                        padding: '8px 16px',
+                                        background: HILLTOP_COLORS.red,
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '6px',
+                                        cursor: 'pointer',
+                                        fontSize: '14px'
+                                    }}
+                                >
                                     Logout
                                 </button>
                             </div>
                             
-                            {/* Progress Bar */}
-                            <div style={{ background: 'white', padding: '20px', borderRadius: '8px', marginBottom: '20px', border: `2px solid ${HILLTOP_COLORS.orange}` }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                                    <span style={{ fontWeight: 'bold', color: HILLTOP_COLORS.charcoal }}>Progress: {completedCount}/{totalTasks}</span>
-                                    <span style={{ fontWeight: 'bold', color: HILLTOP_COLORS.green }}>{percentComplete}% Done</span>
-                                </div>
-                                <div style={{ width: '100%', height: '20px', background: '#e0e0e0', borderRadius: '10px', overflow: 'hidden' }}>
-                                    <div style={{ width: `${percentComplete}%`, height: '100%', background: HILLTOP_COLORS.green, transition: 'width 0.3s ease' }} />
-                                </div>
-                                <div style={{ marginTop: '10px', fontSize: '14px', color: '#666' }}>
-                                    ⏱️ Time remaining: {remainingMinutes} minutes ({percentRemaining}% of work left)
-                                </div>
-                            </div>
-                            
-                            {/* Incomplete Tasks */}
-                            {tasks.length > 0 ? (
-                                <div>
-                                    <h3 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '10px' }}>📋 Available Tasks (Choose Any):</h3>
-                                    {tasks.map((task, idx) => (
-                                        <div 
-                                            key={idx} 
-                                            onClick={() => selectTask(task)} 
-                                            style={{ 
-                                                background: 'white', 
-                                                padding: '16px', 
-                                                marginBottom: '12px', 
-                                                borderRadius: '8px', 
-                                                border: `2px solid ${HILLTOP_COLORS.orange}`, 
-                                                cursor: 'pointer',
-                                                transition: 'transform 0.2s',
-                                                transform: 'scale(1)'
-                                            }}
-                                            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
-                                            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
-                                        >
-                                            <h3 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '8px' }}>{task.task_name}</h3>
-                                            <p style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>{task.station || 'Station'}</p>
-                                            <p style={{ color: HILLTOP_COLORS.orange, fontWeight: 'bold' }}>⏱️ {task.allocated_minutes} min</p>
-                                        </div>
-                                    ))}
+                            {tasks.length === 0 ? (
+                                <div style={{
+                                    background: 'white',
+                                    padding: '40px',
+                                    borderRadius: '8px',
+                                    textAlign: 'center',
+                                    color: HILLTOP_COLORS.green,
+                                    fontSize: '18px',
+                                    fontWeight: 'bold'
+                                }}>
+                                    ✓ Day {currentWorkDay} Complete!
                                 </div>
                             ) : (
-                                <div style={{ background: '#fff3cd', color: '#856404', padding: '20px', borderRadius: '8px', textAlign: 'center', marginBottom: '20px', border: '2px solid #ffc107' }}>
-                                    <h3>✓ All Tasks Completed!</h3>
-                                    <p>Click "End of Day Sign-Off" below to finish and sign out.</p>
-                                </div>
+                                tasks.map((task, idx) => (
+                                    <div
+                                        key={idx}
+                                        style={{
+                                            background: 'white',
+                                            padding: '16px',
+                                            marginBottom: '12px',
+                                            borderRadius: '8px',
+                                            border: `2px solid ${HILLTOP_COLORS.orange}`,
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s'
+                                        }}
+                                        onClick={() => startTask(task)}
+                                    >
+                                        <h3 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '8px' }}>{task.task_name}</h3>
+                                        <p style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>{task.station}</p>
+                                        <p style={{ color: HILLTOP_COLORS.orange, fontWeight: 'bold' }}>⏱️ {task.allocated_minutes} min</p>
+                                    </div>
+                                ))
                             )}
-
-                            {/* Completed Tasks */}
-                            {completedTaskDetails.length > 0 && (
-                                <div style={{ marginTop: '30px', padding: '20px', background: HILLTOP_COLORS.green, borderRadius: '8px', color: 'white' }}>
-                                    <h3 style={{ marginBottom: '15px' }}>✓ Completed Tasks:</h3>
-                                    {completedTaskDetails.map((completed, idx) => (
-                                        <div key={idx} style={{ marginBottom: '8px', opacity: 0.9 }}>
-                                            <div style={{ fontWeight: 'bold' }}>✓ Task #{idx + 1}</div>
-                                            <div style={{ fontSize: '13px', marginLeft: '16px' }}>
-                                                ⏱️ Time taken: {completed.total_elapsed_minutes} minutes
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                            
-                            {/* End of Day Sign-Off Button */}
-                            <div style={{ marginTop: '30px' }}>
-                                <button 
-                                    onClick={() => {
-                                        // Check if clean workplace task is completed
-                                        const cleanWorkplaceCompleted = completedTaskIds.some(id => {
-                                            // This is a temporary check - we'll need a better way
-                                            return true; // For now allow it
-                                        });
-                                        
-                                        if (tasks.length === 0) {
-                                            setScreen('end-of-day-photos');
-                                        } else {
-                                            alert('⚠️ You still have tasks remaining. Complete them or click "Clean Workplace" to end your day.');
-                                        }
-                                    }}
-                                    style={{
-                                        width: '100%',
-                                        padding: '16px',
-                                        background: HILLTOP_COLORS.gold,
-                                        color: HILLTOP_COLORS.charcoal,
-                                        border: 'none',
-                                        borderRadius: '8px',
-                                        fontSize: '16px',
-                                        fontWeight: 'bold',
-                                        cursor: 'pointer'
-                                    }}
-                                >
-                                    🔚 End of Day Sign-Off (+ Photos)
-                                </button>
-                                <p style={{ fontSize: '12px', color: '#666', marginTop: '10px', textAlign: 'center' }}>
-                                    Complete "Clean Workplace" task to enable sign-off
-                                </p>
-                            </div>
                         </div>
                     </div>
                 );
@@ -692,8 +473,6 @@
             // TASK DETAIL
             if (screen === 'task-detail') {
                 const getTimerColor = () => {
-                    if (!isRunning && !isPaused) return HILLTOP_COLORS.charcoal;
-                    if (isPaused) return HILLTOP_COLORS.yellow;
                     const percentOver = ((timer - (activeTask.allocated_minutes * 60)) / (activeTask.allocated_minutes * 60)) * 100;
                     if (percentOver < 0) return HILLTOP_COLORS.green;
                     if (percentOver < 20) return HILLTOP_COLORS.yellow;
@@ -710,38 +489,55 @@
                 return (
                     <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
                         <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-                            <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>{activeTask?.task_name}</h2>
+                            <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>{activeTask.task_name}</h2>
                             
-                            <div style={{ background: getTimerColor(), color: 'white', padding: '40px', borderRadius: '12px', textAlign: 'center', marginBottom: '20px' }}>
-                                <div style={{ fontSize: '48px', fontWeight: 'bold', marginBottom: '10px' }}>{formatTime(timer)}</div>
-                                <div style={{ fontSize: '16px' }}>Allocated: {activeTask?.allocated_minutes} min</div>
-                                {isPaused && <div style={{ fontSize: '14px', marginTop: '10px' }}>⏸️ PAUSED: {pauseReason}</div>}
+                            <div style={{
+                                background: getTimerColor(),
+                                color: 'white',
+                                padding: '40px',
+                                borderRadius: '12px',
+                                textAlign: 'center',
+                                marginBottom: '20px'
+                            }}>
+                                <div style={{ fontSize: '48px', fontWeight: 'bold', marginBottom: '10px' }}>
+                                    {formatTime(timer)}
+                                </div>
+                                <div style={{ fontSize: '16px' }}>Allocated: {activeTask.allocated_minutes} min</div>
                             </div>
 
-                            {!isRunning && (
-                                <button onClick={handleStart} style={{ width: '100%', padding: '14px', background: HILLTOP_COLORS.green, color: 'white', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', marginBottom: '12px', cursor: 'pointer' }}>
-                                    ▶️ START TASK
-                                </button>
-                            )}
-
-                            {isRunning && !isPaused && (
-                                <button onClick={handlePause} style={{ width: '100%', padding: '14px', background: HILLTOP_COLORS.red, color: 'white', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', marginBottom: '12px', cursor: 'pointer' }}>
-                                    ⏸️ PAUSE
-                                </button>
-                            )}
-
-                            {isPaused && (
-                                <button onClick={handleResume} style={{ width: '100%', padding: '14px', background: HILLTOP_COLORS.green, color: 'white', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', marginBottom: '12px', cursor: 'pointer' }}>
-                                    ▶️ RESUME
-                                </button>
-                            )}
-
-                            <button onClick={finishTask} disabled={!isRunning || isPaused} style={{ width: '100%', padding: '14px', background: (isRunning && !isPaused) ? HILLTOP_COLORS.orange : '#ccc', color: 'white', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: (isRunning && !isPaused) ? 'pointer' : 'not-allowed' }}>
-                                ✓ FINISH TASK
+                            <button
+                                onClick={handlePause}
+                                style={{
+                                    width: '100%',
+                                    padding: '14px',
+                                    background: HILLTOP_COLORS.red,
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    fontSize: '16px',
+                                    fontWeight: 'bold',
+                                    marginBottom: '12px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                ⏸️ PAUSE
                             </button>
 
-                            <button onClick={() => setScreen('task-list')} style={{ width: '100%', padding: '10px', background: '#999', color: 'white', border: 'none', borderRadius: '8px', marginTop: '12px', cursor: 'pointer', fontSize: '14px' }}>
-                                ← Back to Tasks
+                            <button
+                                onClick={finishTask}
+                                style={{
+                                    width: '100%',
+                                    padding: '14px',
+                                    background: HILLTOP_COLORS.orange,
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    fontSize: '16px',
+                                    fontWeight: 'bold',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                ✓ FINISH TASK
                             </button>
                         </div>
                     </div>
@@ -754,8 +550,25 @@
                     <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
                         <div style={{ maxWidth: '600px', margin: '0 auto' }}>
                             <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>Why are you pausing?</h2>
+                            
                             {PAUSE_REASONS.map((reason, idx) => (
-                                <button key={idx} onClick={() => confirmPause(reason)} style={{ width: '100%', padding: '14px', background: 'white', color: HILLTOP_COLORS.charcoal, border: `2px solid ${HILLTOP_COLORS.orange}`, borderRadius: '8px', marginBottom: '10px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer', textAlign: 'left' }}>
+                                <button
+                                    key={idx}
+                                    onClick={() => confirmPause(reason)}
+                                    style={{
+                                        width: '100%',
+                                        padding: '14px',
+                                        background: 'white',
+                                        color: HILLTOP_COLORS.charcoal,
+                                        border: `2px solid ${HILLTOP_COLORS.orange}`,
+                                        borderRadius: '8px',
+                                        marginBottom: '10px',
+                                        fontSize: '16px',
+                                        fontWeight: 'bold',
+                                        cursor: 'pointer',
+                                        textAlign: 'left'
+                                    }}
+                                >
                                     {reason}
                                 </button>
                             ))}
@@ -764,43 +577,38 @@
                 );
             }
 
-            // END OF DAY PHOTOS
-            if (screen === 'end-of-day-photos') {
+            // PHOTOS SCREEN
+            if (screen === 'photos') {
+                const angles = ['Front', 'Left', 'Right', 'Back'];
                 return (
                     <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
                         <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-                            <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>📷 Workstation Photos</h2>
-                            <p style={{ color: '#666', marginBottom: '20px' }}>Take photos of the cleaned workstations</p>
+                            <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>Take Photos (4 angles)</h2>
                             
-                            <video ref={videoRef} autoPlay playsInline style={{ width: '100%', borderRadius: '8px', marginBottom: '20px', background: '#000' }} />
-                            <canvas ref={canvasRef} style={{ display: 'none' }} />
-
-                            <div style={{ marginBottom: '20px' }}>
-                                {PHOTO_ANGLES.map((angle, idx) => (
-                                    <button
-                                        key={idx}
-                                        onClick={() => capturePhoto(angle)}
-                                        style={{
-                                            width: '100%',
-                                            padding: '14px',
-                                            background: photos.find(p => p.angle === angle) ? HILLTOP_COLORS.green : HILLTOP_COLORS.orange,
-                                            color: 'white',
-                                            border: 'none',
-                                            borderRadius: '8px',
-                                            marginBottom: '10px',
-                                            fontSize: '16px',
-                                            fontWeight: 'bold',
-                                            cursor: 'pointer'
-                                        }}
-                                    >
-                                        {photos.find(p => p.angle === angle) ? '✓' : '📷'} Photo: {angle}
-                                    </button>
-                                ))}
-                            </div>
+                            {angles.map((angle, idx) => (
+                                <button
+                                    key={idx}
+                                    onClick={() => setPhotos([...photos, angle])}
+                                    style={{
+                                        width: '100%',
+                                        padding: '16px',
+                                        background: photos.includes(angle) ? HILLTOP_COLORS.green : HILLTOP_COLORS.orange,
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '8px',
+                                        marginBottom: '12px',
+                                        fontSize: '16px',
+                                        fontWeight: 'bold',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    {photos.includes(angle) ? '✓' : '📷'} Photo: {angle}
+                                </button>
+                            ))}
 
                             <button
                                 onClick={uploadPhotos}
-                                disabled={photos.length < 4 || loading}
+                                disabled={photos.length < 4}
                                 style={{
                                     width: '100%',
                                     padding: '14px',
@@ -810,10 +618,90 @@
                                     borderRadius: '8px',
                                     fontSize: '16px',
                                     fontWeight: 'bold',
+                                    marginTop: '20px',
                                     cursor: photos.length === 4 ? 'pointer' : 'not-allowed'
                                 }}
                             >
-                                {loading ? 'Uploading...' : `Submit Photos (${photos.length}/4)`}
+                                Continue ({photos.length}/4)
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            // SUPERVISOR SIGN-OFF
+            if (screen === 'supervisor-signoff') {
+                return (
+                    <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
+                        <div style={{ maxWidth: '600px', margin: '0 auto' }}>
+                            <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>Supervisor Approval</h2>
+                            
+                            <input
+                                type="password"
+                                placeholder="Supervisor PIN"
+                                value={supervisorPin}
+                                onChange={(e) => setSupervisorPin(e.target.value)}
+                                style={{
+                                    width: '100%',
+                                    padding: '12px',
+                                    fontSize: '16px',
+                                    border: `2px solid ${HILLTOP_COLORS.orange}`,
+                                    borderRadius: '8px',
+                                    marginBottom: '20px'
+                                }}
+                            />
+
+                            <textarea
+                                placeholder="Rejection reason (if rejecting)"
+                                value={rejectionReason}
+                                onChange={(e) => setRejectionReason(e.target.value)}
+                                style={{
+                                    width: '100%',
+                                    padding: '12px',
+                                    fontSize: '16px',
+                                    border: `2px solid #ddd`,
+                                    borderRadius: '8px',
+                                    marginBottom: '20px',
+                                    minHeight: '80px',
+                                    fontFamily: 'inherit'
+                                }}
+                            />
+
+                            <button
+                                onClick={supervisorApprove}
+                                disabled={!supervisorPin || loading}
+                                style={{
+                                    width: '100%',
+                                    padding: '14px',
+                                    background: HILLTOP_COLORS.green,
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    fontSize: '16px',
+                                    fontWeight: 'bold',
+                                    marginBottom: '12px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                ✓ APPROVE
+                            </button>
+
+                            <button
+                                onClick={supervisorReject}
+                                disabled={!supervisorPin || !rejectionReason || loading}
+                                style={{
+                                    width: '100%',
+                                    padding: '14px',
+                                    background: HILLTOP_COLORS.red,
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    fontSize: '16px',
+                                    fontWeight: 'bold',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                ✗ REJECT
                             </button>
                         </div>
                     </div>
@@ -825,16 +713,6 @@
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<HilltopProductionApp />);
-    </script>
-    <script>
-        // Register service worker for PWA support
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js').then(registration => {
-                console.log('✅ Service Worker registered:', registration);
-            }).catch(error => {
-                console.log('Service Worker registration failed:', error);
-            });
-        }
     </script>
 </body>
 </html>
