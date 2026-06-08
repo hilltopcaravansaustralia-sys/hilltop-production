@@ -58,8 +58,6 @@
             const [isRunning, setIsRunning] = useState(false);
             const [isPaused, setIsPaused] = useState(false);
             const [pauseReason, setPauseReason] = useState(null);
-            const [supervisorPin, setSupervisorPin] = useState('');
-            const [rejectionReason, setRejectionReason] = useState('');
             const [completedTasks, setCompletedTasks] = useState([]);
             const [photos, setPhotos] = useState([]);
             const videoRef = useRef(null);
@@ -117,7 +115,7 @@
                         videoRef.current.srcObject = stream;
                     }
                 } catch (err) {
-                    alert('Camera access denied. Please allow camera access in settings.');
+                    alert('Camera access denied. Please allow camera access.');
                 }
             };
 
@@ -145,16 +143,24 @@
                     for (let i = 0; i < photos.length; i++) {
                         const photo = photos[i];
                         const fileName = `${worker.id}_${new Date().getTime()}_${photo.angle}.jpg`;
+                        
+                        // Convert base64 to blob
                         const base64data = photo.data.split(',')[1];
+                        const binaryString = atob(base64data);
+                        const bytes = new Uint8Array(binaryString.length);
+                        for (let j = 0; j < binaryString.length; j++) {
+                            bytes[j] = binaryString.charCodeAt(j);
+                        }
+                        const blob = new Blob([bytes], { type: 'image/jpeg' });
                         
                         await supabase.storage
                             .from('worker-photos')
-                            .upload(fileName, Buffer.from(base64data, 'base64'), {
+                            .upload(fileName, blob, {
                                 contentType: 'image/jpeg'
                             });
                     }
 
-                    alert('Photos uploaded successfully!');
+                    alert('✓ Photos uploaded successfully!');
                     setPhotos([]);
                     setScreen('task-list');
                 } catch (err) {
