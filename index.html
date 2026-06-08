@@ -2,667 +2,599 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hilltop Production System</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#1C1F26">
+    <link rel="manifest" href="manifest.json">
+    <title>Hilltop Production</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        :root {
+            --ink: #1C1F26;
+            --ink-2: #2A2F3A;
+            --paper: #F4F5F7;
+            --card: #FFFFFF;
+            --line: #E2E5EA;
+            --muted: #6B7280;
+            --orange: #F5A623;
+            --orange-d: #D98A0B;
+            --green: #16A34A;
+            --green-bg: #E7F6EC;
+            --amber: #F59E0B;
+            --amber-bg: #FEF3DC;
+            --slate: #64748B;
+            --red: #DC2626;
+            --red-bg: #FDECEC;
+            --blue: #2563EB;
         }
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f9f9f9;
+            font-family: 'Barlow', -apple-system, sans-serif;
+            background: var(--paper);
+            color: var(--ink);
+            -webkit-font-smoothing: antialiased;
         }
-        #root {
-            min-height: 100vh;
-        }
+        #root { min-height: 100vh; }
+        .cond { font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.01em; }
+        button { font-family: 'Barlow', sans-serif; }
+        button:active { transform: scale(0.985); }
+        .tap { transition: transform 0.08s ease, box-shadow 0.15s ease, border-color 0.15s ease; }
+        ::-webkit-scrollbar { width: 0; }
+        input, textarea { font-family: 'Barlow', sans-serif; }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(8px);} to {opacity:1; transform:none;} }
+        .fu { animation: fadeUp 0.28s ease both; }
     </style>
 </head>
 <body>
     <div id="root"></div>
-
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
         const { createClient } = window.supabase;
 
-        // Supabase setup
         const SUPABASE_URL = 'https://pycdvyaxldjfibncnvsg.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5Y2R2eWF4bGRqZmlibmNudnNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MjY4NzcsImV4cCI6MjA5NjQwMjg3N30.RkI9yVJCMirdXUenl_fGUI5WiQr8n9TyToadiRCwkmI';
-
         const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        const HilltopProductionApp = () => {
+        const ISSUE_REASONS = [
+            'Missing part',
+            'Waiting for another department',
+            'Drawing / plan problem',
+            'Quality issue',
+            'Tool or equipment breakdown',
+            'Stock not available',
+            'Supervisor request',
+            'Other'
+        ];
+
+        const todayStr = () => new Date().toISOString().split('T')[0];
+        const fmtClock = (d) => new Date(d).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+        const fmtDate = (s) => s ? new Date(s).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '—';
+
+        const StatusDot = ({ color }) => (
+            <span style={{ width: 9, height: 9, borderRadius: 9, background: color, display: 'inline-block', flexShrink: 0 }} />
+        );
+
+        const Bar = ({ pct }) => (
+            <div style={{ height: 7, background: '#EAECEF', borderRadius: 6, overflow: 'hidden', width: '100%' }}>
+                <div style={{ height: '100%', width: pct + '%', background: pct >= 100 ? 'var(--green)' : 'var(--orange)', borderRadius: 6, transition: 'width 0.4s ease' }} />
+            </div>
+        );
+
+        const TopBar = ({ worker, onLogout, sub }) => (
+            <div style={{ background: 'var(--ink)', color: '#fff', padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 20 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ width: 34, height: 34, borderRadius: 8, background: 'var(--orange)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span className="cond" style={{ fontWeight: 700, fontSize: 20, color: 'var(--ink)' }}>H</span>
+                    </div>
+                    <div>
+                        <div className="cond" style={{ fontSize: 18, fontWeight: 700, lineHeight: 1, textTransform: 'uppercase' }}>Hilltop Caravans</div>
+                        <div style={{ fontSize: 12, color: '#9AA1AD', marginTop: 2 }}>{sub}</div>
+                    </div>
+                </div>
+                {worker && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.1 }}>{worker.name}</div>
+                            <div style={{ fontSize: 11, color: 'var(--orange)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{worker.department}</div>
+                        </div>
+                        <button onClick={onLogout} style={{ background: 'transparent', border: '1px solid #3A404C', color: '#C9CED7', padding: '7px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Log out</button>
+                    </div>
+                )}
+            </div>
+        );
+
+        const App = () => {
             const [screen, setScreen] = useState('login');
             const [worker, setWorker] = useState(null);
-            const [pinInput, setPinInput] = useState('');
-            const [signoffPPE, setSignoffPPE] = useState(false);
-            const [signoffPolicy, setSignoffPolicy] = useState(false);
+            const [pin, setPin] = useState('');
             const [loading, setLoading] = useState(false);
-            const [tasks, setTasks] = useState([]);
-            const [currentWorkDay, setCurrentWorkDay] = useState(1);
-            const [allTasksTemplate, setAllTasksTemplate] = useState([]);
-            const [endOfDayTriggered, setEndOfDayTriggered] = useState(false);
+            const [ppe, setPpe] = useState(false);
+            const [whs, setWhs] = useState(false);
+
+            const [vans, setVans] = useState([]);
+            const [deptTasks, setDeptTasks] = useState([]);
+            const [completions, setCompletions] = useState({});
+
+            const [selectedVan, setSelectedVan] = useState(null);
             const [activeTask, setActiveTask] = useState(null);
-            const [timer, setTimer] = useState(0);
-            const [isRunning, setIsRunning] = useState(false);
-            const [pauseReason, setPauseReason] = useState(null);
+            const [activeInstanceId, setActiveInstanceId] = useState(null);
+            const [startedAt, setStartedAt] = useState(null);
+            const [elapsedSec, setElapsedSec] = useState(0);
+            const [running, setRunning] = useState(false);
+            const [pausedIssue, setPausedIssue] = useState(null);
+            const [openPauseLogId, setOpenPauseLogId] = useState(null);
+
+            const [issueReason, setIssueReason] = useState(null);
+            const [issueNote, setIssueNote] = useState('');
+            const [issueMode, setIssueMode] = useState('pause');
+
             const [photos, setPhotos] = useState([]);
-            const [supervisorPin, setSupervisorPin] = useState('');
-            const [rejectionReason, setRejectionReason] = useState('');
+            const [supPin, setSupPin] = useState('');
+            const tick = useRef(null);
 
-            const HILLTOP_COLORS = {
-                orange: '#F5A623',
-                gold: '#FFD700',
-                charcoal: '#2C2C2C',
-                light: '#F9F9F9',
-                green: '#10B981',
-                yellow: '#F59E0B',
-                orangeWarn: '#F97316',
-                red: '#EF4444'
-            };
-
-            const PAUSE_REASONS = [
-                'Missing parts', 'Waiting for other department', 'Tool or equipment issue',
-                'Forklift unavailable', 'Supervisor request', 'Customer repair job',
-                'Material shortage', 'Tea break', 'Lunch break', 'Toilet break',
-                'Helping another worker', 'Other'
-            ];
-
-            // Timer effect
             useEffect(() => {
-                let interval;
-                if (isRunning) {
-                    interval = setInterval(() => {
-                        setTimer(prev => prev + 1);
+                if (running && startedAt) {
+                    tick.current = setInterval(() => {
+                        setElapsedSec(Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
                     }, 1000);
                 }
-                return () => clearInterval(interval);
-            }, [isRunning]);
+                return () => clearInterval(tick.current);
+            }, [running, startedAt]);
 
-            const handleLogin = async () => {
+            const loadDashboard = async (w) => {
+                const { data: vanData } = await supabase
+                    .from('vans').select('*')
+                    .eq('status', 'In Progress')
+                    .order('production_line', { ascending: true });
+
+                const { data: taskData } = await supabase
+                    .from('tasks_template').select('*')
+                    .eq('department', w.department)
+                    .eq('is_active', true)
+                    .order('sequence_order', { ascending: true });
+
+                const { data: instData } = await supabase
+                    .from('task_instances').select('id, van_id, task_template_id, finished_at, started_at')
+                    .eq('worker_id', w.id)
+                    .gte('created_at', todayStr() + 'T00:00:00');
+
+                const map = {};
+                (instData || []).forEach(i => { map[`${i.van_id}-${i.task_template_id}`] = i; });
+
+                setVans(vanData || []);
+                setDeptTasks(taskData || []);
+                setCompletions(map);
+            };
+
+            const vanProgress = (vanId) => {
+                if (!deptTasks.length) return { done: 0, total: 0, pct: 0 };
+                let done = 0;
+                deptTasks.forEach(t => {
+                    const c = completions[`${vanId}-${t.id}`];
+                    if (c && c.finished_at) done++;
+                });
+                return { done, total: deptTasks.length, pct: Math.round((done / deptTasks.length) * 100) };
+            };
+
+            const doLogin = async () => {
                 setLoading(true);
                 try {
-                    const { data, error } = await supabase
-                        .from('workers')
-                        .select('*')
-                        .eq('pin', pinInput)
-                        .single();
-
-                    if (error) throw new Error('Invalid PIN');
+                    const { data, error } = await supabase.from('workers').select('*').eq('pin', pin).single();
+                    if (error || !data) throw new Error();
                     setWorker(data);
-                    setScreen('morning-signoff');
-                } catch (err) {
-                    alert('Invalid PIN. Try again.');
-                }
+                    setScreen('morning');
+                } catch { alert('PIN not recognised. Please try again.'); }
                 setLoading(false);
             };
 
-            const handleSignoff = async () => {
-                if (!signoffPPE || !signoffPolicy) {
-                    alert('Please acknowledge both PPE and WHS policy');
-                    return;
-                }
+            const doMorning = async () => {
+                if (!ppe || !whs) { alert('Please confirm both safety checks.'); return; }
                 setLoading(true);
                 try {
                     await supabase.from('daily_signoffs').insert([{
-                        worker_id: worker.id,
-                        signoff_date: new Date().toISOString().split('T')[0],
-                        ppe_acknowledged: true,
-                        whs_policy_acknowledged: true
+                        worker_id: worker.id, signoff_date: todayStr(),
+                        ppe_acknowledged: true, whs_policy_acknowledged: true
                     }]);
-                    
-                    // Load ALL tasks for this department (will filter by work_day in task-list)
-                    const { data: tasksData } = await supabase
-                        .from('tasks_template')
-                        .select('*')
-                        .eq('department', worker.department)
-                        .order('sequence_order', { ascending: true });
-                    
-                    setAllTasksTemplate(tasksData || []);
-                    
-                    // Filter to show only Day 1 tasks
-                    const dayTasks = (tasksData || []).filter(t => t.work_day === currentWorkDay);
-                    setTasks(dayTasks);
-                    setScreen('task-list');
-                } catch (err) {
-                    alert('Error during sign-off');
-                }
-                setLoading(false);
-            };
-
-            const checkAndAdvanceDay = async (completedTaskId) => {
-                // Check if all tasks for current work_day are now complete
-                const dayTasks = allTasksTemplate.filter(t => t.work_day === currentWorkDay);
-                
-                // Count how many of these tasks have been completed
-                const { data: completedTasks } = await supabase
-                    .from('task_instances')
-                    .select('task_template_id')
-                    .eq('worker_id', worker.id)
-                    .in('task_template_id', dayTasks.map(t => t.id))
-                    .eq('signoff_status', 'approved');
-                
-                const completedIds = (completedTasks || []).map(t => t.task_template_id);
-                const allDayTasksComplete = dayTasks.every(t => completedIds.includes(t.id));
-                
-                if (allDayTasksComplete) {
-                    // Advance to next work_day
-                    const nextDay = currentWorkDay + 1;
-                    const nextDayTasks = allTasksTemplate.filter(t => t.work_day === nextDay);
-                    
-                    if (nextDayTasks.length > 0) {
-                        setCurrentWorkDay(nextDay);
-                        setTasks(nextDayTasks);
-                        alert(`✓ Day ${currentWorkDay} Complete! Moving to Day ${nextDay}`);
-                    } else {
-                        alert('✓ All work complete for today!');
-                        setTasks([]);
-                    }
-                }
-            };
-
-            const startTask = (task) => {
-                setActiveTask(task);
-                setTimer(0);
-                setIsRunning(true);
-                setPauseReason(null);
-                setScreen('task-detail');
-            };
-
-            const handlePause = () => {
-                setIsRunning(false);
-                setScreen('pause-reason');
-            };
-
-            const confirmPause = (reason) => {
-                setPauseReason(reason);
-                setScreen('task-detail');
-            };
-
-            const finishTask = () => {
-                setIsRunning(false);
-                // Just go back to task list - no photos, no supervisor yet
-                setScreen('task-list');
-            };
-
-            const endOfDaySignoff = () => {
-                // Worker clicked "I've Finished My Work for Today"
-                setEndOfDayTriggered(true);
-                setPhotos([]); // Reset photos for fresh capture
-                setScreen('photos');
-            };
-
-            const uploadPhotos = async () => {
-                if (photos.length < 4) {
-                    alert('Please take all 4 photos');
-                    return;
-                }
-                // After photos, show supervisor signoff waiting screen
-                setScreen('supervisor-signoff');
-            };
-
-            const supervisorApprove = async () => {
-                setLoading(true);
-                try {
-                    const { data: supervisor } = await supabase
-                        .from('workers')
-                        .select('*')
-                        .eq('pin', supervisorPin)
-                        .single();
-
-                    if (!supervisor) throw new Error('Invalid supervisor PIN');
-
-                    if (endOfDayTriggered) {
-                        // End of day: Mark all tasks for today as complete
-                        const dayTasks = allTasksTemplate.filter(t => t.work_day === currentWorkDay);
-                        
-                        // Insert one record per task as approved
-                        const taskRecords = dayTasks.map(task => ({
-                            worker_id: worker.id,
-                            van_id: 1,
-                            task_template_id: task.id,
-                            started_at: new Date().toISOString(),
-                            finished_at: new Date().toISOString(),
-                            total_elapsed_minutes: 0,
-                            active_work_minutes: 0,
-                            signoff_status: 'approved',
-                            supervisor_signoff_id: supervisor.id,
-                            supervisor_signoff_at: new Date().toISOString()
-                        }));
-                        
-                        await supabase.from('task_instances').insert(taskRecords);
-                        
-                        alert('✓ Day Complete! Your work for today is approved.');
-                        setSupervisorPin('');
-                        setPhotos([]);
-                        setEndOfDayTriggered(false);
-                        setTasks([]);
-                        setScreen('task-list');
-                    }
-                } catch (err) {
-                    alert('Supervisor PIN invalid');
-                }
-                setLoading(false);
-            };
-
-            const supervisorReject = async () => {
-                if (endOfDayTriggered) {
-                    alert('Cannot reject end-of-day signoff. Please approve to complete.');
-                    return;
-                }
-                
-                if (!rejectionReason) {
-                    alert('Please provide rejection reason');
-                    return;
-                }
-                setLoading(true);
-                try {
-                    const { data: supervisor } = await supabase
-                        .from('workers')
-                        .select('*')
-                        .eq('pin', supervisorPin)
-                        .single();
-
-                    if (!supervisor) throw new Error('Invalid supervisor PIN');
-
-                    await supabase.from('task_instances').insert([{
-                        worker_id: worker.id,
-                        van_id: 1,
-                        task_template_id: activeTask.id,
-                        started_at: new Date().toISOString(),
-                        finished_at: new Date().toISOString(),
-                        total_elapsed_minutes: Math.floor(timer / 60),
-                        active_work_minutes: Math.floor(timer / 60),
-                        signoff_status: 'rejected',
-                        supervisor_signoff_id: supervisor.id,
-                        supervisor_signoff_at: new Date().toISOString(),
-                        rejection_reason: rejectionReason,
-                        rejection_count: 1
-                    }]);
-
-                    alert('Task rejected. Worker needs to redo.');
-                    setSupervisorPin('');
-                    setRejectionReason('');
-                    setPhotos([]);
-                    setScreen('task-list');
-                } catch (err) {
-                    alert('Supervisor PIN invalid');
-                }
+                    await loadDashboard(worker);
+                    setScreen('dashboard');
+                } catch { alert('Could not save sign-on. Try again.'); }
                 setLoading(false);
             };
 
             const logout = () => {
-                setWorker(null);
-                setScreen('login');
-                setPinInput('');
-                setTasks([]);
-                setPhotos([]);
-                setCurrentWorkDay(1);
-                setAllTasksTemplate([]);
-                setEndOfDayTriggered(false);
+                clearInterval(tick.current);
+                setWorker(null); setPin(''); setScreen('login');
+                setPpe(false); setWhs(false);
+                setVans([]); setDeptTasks([]); setCompletions({});
+                setSelectedVan(null); setActiveTask(null); setActiveInstanceId(null);
+                setRunning(false); setElapsedSec(0); setPhotos([]); setSupPin('');
+                setPausedIssue(null); setOpenPauseLogId(null);
             };
 
-            // LOGIN SCREEN
+            const openChassis = (van) => { setSelectedVan(van); setScreen('chassis'); };
+
+            const startTask = async (task) => {
+                setLoading(true);
+                try {
+                    const startIso = new Date().toISOString();
+                    const { data, error } = await supabase.from('task_instances').insert([{
+                        worker_id: worker.id,
+                        van_id: selectedVan.id,
+                        task_template_id: task.id,
+                        started_at: startIso,
+                        signoff_status: 'pending',
+                        production_line: selectedVan.production_line
+                    }]).select().single();
+                    if (error) throw error;
+                    setActiveTask(task);
+                    setActiveInstanceId(data.id);
+                    setStartedAt(startIso);
+                    setElapsedSec(0);
+                    setRunning(true);
+                    setPausedIssue(null);
+                    setOpenPauseLogId(null);
+                    setScreen('active');
+                } catch (e) { alert('Could not start task.'); }
+                setLoading(false);
+            };
+
+            const completeTask = async () => {
+                setLoading(true);
+                try {
+                    const mins = Math.max(0, Math.round(elapsedSec / 60));
+                    await supabase.from('task_instances').update({
+                        finished_at: new Date().toISOString(),
+                        total_elapsed_minutes: mins,
+                        active_work_minutes: mins,
+                        signoff_status: 'pending'
+                    }).eq('id', activeInstanceId);
+                    setRunning(false);
+                    setCompletions(prev => ({ ...prev, [`${selectedVan.id}-${activeTask.id}`]: { id: activeInstanceId, finished_at: new Date().toISOString() } }));
+                    setActiveTask(null); setActiveInstanceId(null); setElapsedSec(0);
+                    setScreen('chassis');
+                } catch { alert('Could not complete task.'); }
+                setLoading(false);
+            };
+
+            const openIssue = (mode) => { setIssueMode(mode); setIssueReason(null); setIssueNote(''); setScreen('issue'); setRunning(false); };
+
+            const submitIssue = async () => {
+                if (!issueReason) { alert('Please choose a reason.'); return; }
+                setLoading(true);
+                try {
+                    const { data: reasons } = await supabase.from('pause_reasons').select('*');
+                    const match = (reasons || []).find(r =>
+                        (r.reason_name || r.reason || r.name || '').toLowerCase() === issueReason.toLowerCase());
+                    const { data: log } = await supabase.from('pause_logs').insert([{
+                        task_instance_id: activeInstanceId,
+                        worker_id: worker.id,
+                        pause_reason_id: match ? match.id : null,
+                        pause_start: new Date().toISOString()
+                    }]).select().single();
+                    setOpenPauseLogId(log ? log.id : null);
+                    setPausedIssue({ reason: issueReason, note: issueNote, mode: issueMode });
+                    setScreen('active');
+                } catch {
+                    setPausedIssue({ reason: issueReason, note: issueNote, mode: issueMode });
+                    setScreen('active');
+                }
+                setLoading(false);
+            };
+
+            const resumeTask = async () => {
+                if (openPauseLogId) {
+                    try {
+                        const { data: log } = await supabase.from('pause_logs').select('pause_start').eq('id', openPauseLogId).single();
+                        const mins = log ? Math.max(0, Math.round((Date.now() - new Date(log.pause_start).getTime()) / 60000)) : 0;
+                        await supabase.from('pause_logs').update({ pause_end: new Date().toISOString(), pause_minutes: mins }).eq('id', openPauseLogId);
+                    } catch {}
+                }
+                setOpenPauseLogId(null); setPausedIssue(null); setRunning(true);
+            };
+
+            const finishDay = () => { setPhotos([]); setScreen('photos'); };
+            const submitPhotos = () => {
+                if (photos.length < 4) { alert('Please capture all 4 angles.'); return; }
+                setScreen('supervisor');
+            };
+            const supervisorApprove = async () => {
+                setLoading(true);
+                try {
+                    const { data: sup } = await supabase.from('workers').select('*').eq('pin', supPin).single();
+                    if (!sup) throw new Error();
+                    await supabase.from('task_instances').update({
+                        signoff_status: 'approved',
+                        supervisor_signoff_id: sup.id,
+                        supervisor_signoff_at: new Date().toISOString()
+                    }).eq('worker_id', worker.id).gte('created_at', todayStr() + 'T00:00:00').eq('signoff_status', 'pending');
+                    alert('Day signed off. Good work today.');
+                    logout();
+                } catch { alert('Supervisor PIN not recognised.'); setLoading(false); }
+            };
+
+            // ================= SCREENS =================
+
             if (screen === 'login') {
                 return (
-                    <div style={{
-                        minHeight: '100vh',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        background: `linear-gradient(135deg, ${HILLTOP_COLORS.orange} 0%, ${HILLTOP_COLORS.charcoal} 100%)`
-                    }}>
-                        <div style={{
-                            background: 'white',
-                            padding: '40px',
-                            borderRadius: '12px',
-                            width: '100%',
-                            maxWidth: '400px',
-                            boxShadow: '0 10px 40px rgba(0,0,0,0.2)'
-                        }}>
-                            <h1 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '30px', textAlign: 'center', fontSize: '28px' }}>
-                                🚐 Hilltop Production
-                            </h1>
-                            <p style={{ color: '#666', textAlign: 'center', marginBottom: '20px' }}>Enter your PIN to start</p>
-                            <input
-                                type="password"
-                                placeholder="Worker PIN"
-                                value={pinInput}
-                                onChange={(e) => setPinInput(e.target.value)}
-                                onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
-                                style={{
-                                    width: '100%',
-                                    padding: '12px',
-                                    fontSize: '18px',
-                                    border: `2px solid ${HILLTOP_COLORS.orange}`,
-                                    borderRadius: '8px',
-                                    marginBottom: '20px',
-                                    textAlign: 'center',
-                                    letterSpacing: '2px'
-                                }}
-                            />
-                            <button
-                                onClick={handleLogin}
-                                disabled={loading}
-                                style={{
-                                    width: '100%',
-                                    padding: '14px',
-                                    background: HILLTOP_COLORS.orange,
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    fontSize: '16px',
-                                    fontWeight: 'bold',
-                                    cursor: 'pointer',
-                                    opacity: loading ? 0.7 : 1
-                                }}
-                            >
-                                {loading ? 'Loading...' : 'Login'}
+                    <div style={{ minHeight: '100vh', background: 'var(--ink)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+                        <div className="fu" style={{ width: '100%', maxWidth: 380 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 36, justifyContent: 'center' }}>
+                                <div style={{ width: 52, height: 52, borderRadius: 12, background: 'var(--orange)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    <span className="cond" style={{ fontWeight: 700, fontSize: 32, color: 'var(--ink)' }}>H</span>
+                                </div>
+                                <div>
+                                    <div className="cond" style={{ color: '#fff', fontSize: 26, fontWeight: 700, lineHeight: 1, textTransform: 'uppercase' }}>Hilltop Caravans</div>
+                                    <div style={{ color: '#9AA1AD', fontSize: 13, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Production Floor</div>
+                                </div>
+                            </div>
+                            <div style={{ background: 'var(--card)', borderRadius: 16, padding: 26 }}>
+                                <div className="cond" style={{ fontSize: 22, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Sign in</div>
+                                <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 20 }}>Enter your worker PIN to start.</div>
+                                <input type="tel" inputMode="numeric" value={pin} onChange={e => setPin(e.target.value)} placeholder="••••"
+                                    style={{ width: '100%', padding: '16px', fontSize: 26, textAlign: 'center', letterSpacing: '0.4em', border: '2px solid var(--line)', borderRadius: 12, marginBottom: 18, fontWeight: 700 }} />
+                                <button onClick={doLogin} disabled={loading || !pin}
+                                    style={{ width: '100%', padding: 16, background: 'var(--orange)', color: 'var(--ink)', border: 'none', borderRadius: 12, fontSize: 17, fontWeight: 700, cursor: 'pointer', opacity: (loading || !pin) ? 0.5 : 1 }}>
+                                    {loading ? 'Checking…' : 'Sign in'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (screen === 'morning') {
+                const Check = ({ on, set, title, desc }) => (
+                    <div onClick={() => set(!on)} className="tap" style={{ display: 'flex', gap: 14, padding: 18, border: `2px solid ${on ? 'var(--green)' : 'var(--line)'}`, background: on ? 'var(--green-bg)' : 'var(--card)', borderRadius: 12, cursor: 'pointer', marginBottom: 12 }}>
+                        <div style={{ width: 26, height: 26, borderRadius: 7, border: `2px solid ${on ? 'var(--green)' : '#C7CCD4'}`, background: on ? 'var(--green)' : '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            {on && <span style={{ color: '#fff', fontWeight: 700, fontSize: 16 }}>✓</span>}
+                        </div>
+                        <div>
+                            <div style={{ fontWeight: 700, fontSize: 16 }}>{title}</div>
+                            <div style={{ color: 'var(--muted)', fontSize: 14, marginTop: 2 }}>{desc}</div>
+                        </div>
+                    </div>
+                );
+                return (
+                    <div style={{ minHeight: '100vh' }}>
+                        <TopBar worker={worker} onLogout={logout} sub="Morning sign-on" />
+                        <div className="fu" style={{ maxWidth: 560, margin: '0 auto', padding: 20 }}>
+                            <div className="cond" style={{ fontSize: 26, fontWeight: 700, textTransform: 'uppercase' }}>Good morning, {worker.name.split(' ')[0]}</div>
+                            <div style={{ color: 'var(--muted)', marginBottom: 22 }}>Confirm your safety checks to start the day.</div>
+                            <Check on={ppe} set={setPpe} title="PPE on" desc="Boots, hi-vis and eye protection where required." />
+                            <Check on={whs} set={setWhs} title="WHS policy" desc="I will follow site safety procedures today." />
+                            <button onClick={doMorning} disabled={loading}
+                                style={{ width: '100%', padding: 16, marginTop: 8, background: (ppe && whs) ? 'var(--orange)' : '#D6D9DE', color: 'var(--ink)', border: 'none', borderRadius: 12, fontSize: 17, fontWeight: 700, cursor: 'pointer' }}>
+                                {loading ? 'Saving…' : 'Start my day'}
                             </button>
-                            <p style={{ fontSize: '12px', color: '#999', marginTop: '20px', textAlign: 'center' }}>
-                                Test PINs: 1001 (Gaya), 1002 (Tharinda), 2001 (Ruwan), 7777 (Dasun)
-                            </p>
                         </div>
                     </div>
                 );
             }
 
-            // MORNING SIGN-OFF
-            if (screen === 'morning-signoff') {
+            if (screen === 'dashboard') {
                 return (
-                    <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
-                        <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-                            <div style={{ background: 'white', padding: '30px', borderRadius: '12px', boxShadow: '0 2px 10px rgba(0,0,0,0.1)' }}>
-                                <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '10px' }}>Good morning, {worker?.name}!</h2>
-                                <p style={{ color: '#666', marginBottom: '30px' }}>Daily safety acknowledgement</p>
-                                
-                                <label style={{ display: 'flex', alignItems: 'center', marginBottom: '20px', cursor: 'pointer' }}>
-                                    <input
-                                        type="checkbox"
-                                        checked={signoffPPE}
-                                        onChange={(e) => setSignoffPPE(e.target.checked)}
-                                        style={{ marginRight: '10px', width: '18px', height: '18px' }}
-                                    />
-                                    <span style={{ fontSize: '16px' }}>✅ I have PPE and it fits correctly</span>
-                                </label>
-                                
-                                <label style={{ display: 'flex', alignItems: 'center', marginBottom: '30px', cursor: 'pointer' }}>
-                                    <input
-                                        type="checkbox"
-                                        checked={signoffPolicy}
-                                        onChange={(e) => setSignoffPolicy(e.target.checked)}
-                                        style={{ marginRight: '10px', width: '18px', height: '18px' }}
-                                    />
-                                    <span style={{ fontSize: '16px' }}>✅ I agree to Hilltop WHS policy</span>
-                                </label>
-
-                                <button
-                                    onClick={handleSignoff}
-                                    disabled={!signoffPPE || !signoffPolicy || loading}
-                                    style={{
-                                        width: '100%',
-                                        padding: '14px',
-                                        background: signoffPPE && signoffPolicy ? HILLTOP_COLORS.orange : '#ccc',
-                                        color: 'white',
-                                        border: 'none',
-                                        borderRadius: '8px',
-                                        fontSize: '16px',
-                                        fontWeight: 'bold',
-                                        cursor: signoffPPE && signoffPolicy ? 'pointer' : 'not-allowed'
-                                    }}
-                                >
-                                    {loading ? 'Signing off...' : 'Start Work'}
-                                </button>
+                    <div style={{ minHeight: '100vh' }}>
+                        <TopBar worker={worker} onLogout={logout} sub={`${worker.department} · ${fmtDate(todayStr())}`} />
+                        <div className="fu" style={{ maxWidth: 720, margin: '0 auto', padding: 20 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+                                <div className="cond" style={{ fontSize: 24, fontWeight: 700, textTransform: 'uppercase' }}>Caravans on the floor</div>
+                                <div style={{ fontSize: 13, color: 'var(--muted)' }}>{vans.length} in progress</div>
                             </div>
+                            <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 18 }}>Tap a chassis to see your {worker.department.toLowerCase()} tasks.</div>
+
+                            {vans.length === 0 && (
+                                <div style={{ background: 'var(--card)', borderRadius: 14, padding: 40, textAlign: 'center', color: 'var(--muted)' }}>No caravans in progress right now.</div>
+                            )}
+
+                            {vans.map((v, i) => {
+                                const p = vanProgress(v.id);
+                                const complete = p.pct >= 100;
+                                return (
+                                    <div key={v.id} onClick={() => openChassis(v)} className="tap fu" style={{ animationDelay: (i * 0.04) + 's', background: 'var(--card)', borderRadius: 14, padding: 18, marginBottom: 14, border: '1px solid var(--line)', cursor: 'pointer', boxShadow: '0 1px 2px rgba(20,25,35,0.04)' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                            <div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                    <span className="cond" style={{ fontSize: 26, fontWeight: 700, letterSpacing: '0.02em' }}>{v.chassis_number}</span>
+                                                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--slate)', border: '1px solid var(--line)', borderRadius: 20, padding: '2px 10px' }}>Line {v.production_line}</span>
+                                                </div>
+                                                <div style={{ color: 'var(--muted)', fontSize: 15, marginTop: 2 }}>{v.model}</div>
+                                            </div>
+                                            <div style={{ textAlign: 'right' }}>
+                                                <div style={{ fontSize: 12, color: 'var(--muted)' }}>Due</div>
+                                                <div style={{ fontWeight: 700, fontSize: 15 }}>{fmtDate(v.target_completion_date)}</div>
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
+                                            <div style={{ flex: 1 }}><Bar pct={p.pct} /></div>
+                                            <div style={{ fontSize: 13, fontWeight: 700, color: complete ? 'var(--green)' : 'var(--ink)', minWidth: 96, textAlign: 'right' }}>
+                                                {p.done}/{p.total} {worker.department.toLowerCase()}
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+
+                            <button onClick={finishDay} style={{ width: '100%', padding: 16, marginTop: 8, background: 'var(--ink)', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>
+                                Finish my work for today
+                            </button>
                         </div>
                     </div>
                 );
             }
 
-            // TASK LIST
-            if (screen === 'task-list') {
+            if (screen === 'chassis') {
+                const p = vanProgress(selectedVan.id);
                 return (
-                    <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
-                        <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                                <h2 style={{ color: HILLTOP_COLORS.charcoal }}>
-                                    Day {currentWorkDay} Tasks 
-                                    <span style={{ fontSize: '14px', color: '#999', marginLeft: '8px' }}>
-                                        ({tasks.length} remaining)
-                                    </span>
-                                </h2>
-                                <button
-                                    onClick={logout}
-                                    style={{
-                                        padding: '8px 16px',
-                                        background: HILLTOP_COLORS.red,
-                                        color: 'white',
-                                        border: 'none',
-                                        borderRadius: '6px',
-                                        cursor: 'pointer',
-                                        fontSize: '14px'
-                                    }}
-                                >
-                                    Logout
-                                </button>
+                    <div style={{ minHeight: '100vh' }}>
+                        <TopBar worker={worker} onLogout={logout} sub={`${worker.department} tasks`} />
+                        <div className="fu" style={{ maxWidth: 720, margin: '0 auto', padding: 20 }}>
+                            <button onClick={() => setScreen('dashboard')} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 15, fontWeight: 600, cursor: 'pointer', padding: 0, marginBottom: 14 }}>‹ All caravans</button>
+
+                            <div style={{ background: 'var(--ink)', color: '#fff', borderRadius: 14, padding: 18, marginBottom: 18 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <div>
+                                        <span className="cond" style={{ fontSize: 30, fontWeight: 700 }}>{selectedVan.chassis_number}</span>
+                                        <div style={{ color: '#9AA1AD', fontSize: 15 }}>{selectedVan.model} · Line {selectedVan.production_line}</div>
+                                    </div>
+                                    <div style={{ textAlign: 'right' }}>
+                                        <div className="cond" style={{ fontSize: 30, fontWeight: 700, color: 'var(--orange)' }}>{p.pct}%</div>
+                                        <div style={{ color: '#9AA1AD', fontSize: 13 }}>{p.done} of {p.total} done</div>
+                                    </div>
+                                </div>
+                                {selectedVan.notes && <div style={{ marginTop: 12, fontSize: 13, color: '#C9CED7', borderTop: '1px solid #353B47', paddingTop: 10 }}>Note: {selectedVan.notes}</div>}
                             </div>
-                            
-                            {tasks.length === 0 ? (
-                                <div style={{
-                                    background: 'white',
-                                    padding: '40px',
-                                    borderRadius: '8px',
-                                    textAlign: 'center',
-                                    color: HILLTOP_COLORS.green,
-                                    fontSize: '18px',
-                                    fontWeight: 'bold'
-                                }}>
-                                    ✓ Day {currentWorkDay} Complete!
+
+                            <div className="cond" style={{ fontSize: 18, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 10 }}>{worker.department} checklist</div>
+
+                            {deptTasks.map(t => {
+                                const c = completions[`${selectedVan.id}-${t.id}`];
+                                const done = c && c.finished_at;
+                                const inProgress = c && !c.finished_at;
+                                return (
+                                    <div key={t.id} className="tap" style={{ background: 'var(--card)', borderRadius: 12, padding: 16, marginBottom: 10, border: `1px solid ${done ? 'var(--green)' : inProgress ? 'var(--amber)' : 'var(--line)'}`, display: 'flex', alignItems: 'center', gap: 14, opacity: done ? 0.72 : 1 }}>
+                                        <StatusDot color={done ? 'var(--green)' : inProgress ? 'var(--amber)' : '#C7CCD4'} />
+                                        <div style={{ flex: 1 }}>
+                                            <div style={{ fontWeight: 600, fontSize: 16, textDecoration: done ? 'line-through' : 'none', color: done ? 'var(--muted)' : 'var(--ink)' }}>{t.task_name}</div>
+                                            <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 2 }}>
+                                                {done ? 'Completed' : inProgress ? 'In progress' : `Target ${t.allocated_minutes} min`}
+                                            </div>
+                                        </div>
+                                        {!done && (
+                                            <button onClick={() => inProgress ? (setActiveTask(t), setActiveInstanceId(c.id), setStartedAt(c.started_at), setRunning(true), setScreen('active')) : startTask(t)}
+                                                style={{ background: inProgress ? 'var(--amber)' : 'var(--orange)', color: 'var(--ink)', border: 'none', borderRadius: 9, padding: '10px 18px', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
+                                                {inProgress ? 'Resume' : 'Start'}
+                                            </button>
+                                        )}
+                                    </div>
+                                );
+                            })}
+
+                            <button onClick={finishDay} style={{ width: '100%', padding: 16, marginTop: 12, background: 'var(--ink)', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>
+                                Finish my work for today
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (screen === 'active') {
+                const targetSec = (activeTask.allocated_minutes || 0) * 60;
+                const over = elapsedSec - targetSec;
+                const mm = Math.floor(elapsedSec / 60), ss = elapsedSec % 60;
+                const statusColor = !running ? 'var(--slate)' : over > targetSec * 0.2 ? 'var(--red)' : over > 0 ? 'var(--amber)' : 'var(--green)';
+                const statusText = !running ? 'Paused' : over > 0 ? `${Math.floor(over / 60)} min over target` : 'On target';
+                return (
+                    <div style={{ minHeight: '100vh' }}>
+                        <TopBar worker={worker} onLogout={logout} sub={`${selectedVan.chassis_number} · ${selectedVan.model}`} />
+                        <div className="fu" style={{ maxWidth: 560, margin: '0 auto', padding: 20 }}>
+                            <button onClick={() => { setRunning(false); setScreen('chassis'); }} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 15, fontWeight: 600, cursor: 'pointer', padding: 0, marginBottom: 14 }}>‹ Back to {selectedVan.chassis_number}</button>
+
+                            <div style={{ fontSize: 13, color: 'var(--orange)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Current task</div>
+                            <div className="cond" style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.1, marginBottom: 18 }}>{activeTask.task_name}</div>
+
+                            {pausedIssue && (
+                                <div style={{ background: 'var(--red-bg)', border: '1px solid #F3C2C2', borderRadius: 12, padding: 14, marginBottom: 16 }}>
+                                    <div style={{ fontWeight: 700, color: 'var(--red)', fontSize: 14 }}>{pausedIssue.mode === 'help' ? 'Help requested' : 'Paused'}: {pausedIssue.reason}</div>
+                                    {pausedIssue.note && <div style={{ fontSize: 13, color: '#7A2E2E', marginTop: 4 }}>{pausedIssue.note}</div>}
+                                </div>
+                            )}
+
+                            <div style={{ background: 'var(--card)', borderRadius: 16, padding: 24, border: '1px solid var(--line)', marginBottom: 18 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 18 }}>
+                                    <div>
+                                        <div style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Started</div>
+                                        <div style={{ fontWeight: 700, fontSize: 18 }}>{startedAt ? fmtClock(startedAt) : '—'}</div>
+                                    </div>
+                                    <div style={{ textAlign: 'right' }}>
+                                        <div style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Target</div>
+                                        <div style={{ fontWeight: 700, fontSize: 18 }}>{activeTask.allocated_minutes} min</div>
+                                    </div>
+                                </div>
+                                <div style={{ textAlign: 'center', padding: '10px 0' }}>
+                                    <div className="cond" style={{ fontSize: 64, fontWeight: 700, color: statusColor, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+                                        {String(mm).padStart(2, '0')}:{String(ss).padStart(2, '0')}
+                                    </div>
+                                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginTop: 10, background: '#F1F3F5', borderRadius: 20, padding: '5px 14px' }}>
+                                        <StatusDot color={statusColor} />
+                                        <span style={{ fontWeight: 600, fontSize: 14, color: statusColor }}>{statusText}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {running ? (
+                                <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+                                    <button onClick={() => openIssue('pause')} style={{ flex: 1, padding: 16, background: 'var(--card)', color: 'var(--ink)', border: '2px solid var(--line)', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Pause</button>
+                                    <button onClick={() => openIssue('help')} style={{ flex: 1, padding: 16, background: 'var(--red-bg)', color: 'var(--red)', border: '2px solid #F3C2C2', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Need help</button>
                                 </div>
                             ) : (
-                                <>
-                                    {tasks.map((task, idx) => (
-                                        <div
-                                            key={idx}
-                                            style={{
-                                                background: 'white',
-                                                padding: '16px',
-                                                marginBottom: '12px',
-                                                borderRadius: '8px',
-                                                border: `2px solid ${HILLTOP_COLORS.orange}`,
-                                                cursor: 'pointer',
-                                                transition: 'all 0.2s'
-                                            }}
-                                            onClick={() => startTask(task)}
-                                        >
-                                            <h3 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '8px' }}>{task.task_name}</h3>
-                                            <p style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>{task.station}</p>
-                                            <p style={{ color: HILLTOP_COLORS.orange, fontWeight: 'bold' }}>⏱️ {task.allocated_minutes} min</p>
-                                        </div>
-                                    ))}
-                                    
-                                    <button
-                                        onClick={endOfDaySignoff}
-                                        style={{
-                                            width: '100%',
-                                            padding: '16px',
-                                            background: '#FF6B00',
-                                            color: 'white',
-                                            border: 'none',
-                                            borderRadius: '8px',
-                                            fontSize: '16px',
-                                            fontWeight: 'bold',
-                                            marginTop: '20px',
-                                            cursor: 'pointer'
-                                        }}
-                                    >
-                                        ✓ I've Finished My Work for Today
-                                    </button>
-                                </>
+                                <button onClick={resumeTask} style={{ width: '100%', padding: 16, marginBottom: 12, background: 'var(--green)', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>Resume task</button>
                             )}
+
+                            <button onClick={completeTask} disabled={loading} style={{ width: '100%', padding: 18, background: 'var(--orange)', color: 'var(--ink)', border: 'none', borderRadius: 12, fontSize: 18, fontWeight: 700, cursor: 'pointer' }}>
+                                {loading ? 'Saving…' : 'Complete task'}
+                            </button>
                         </div>
                     </div>
                 );
             }
 
-            // TASK DETAIL
-            if (screen === 'task-detail') {
-                const getTimerColor = () => {
-                    const percentOver = ((timer - (activeTask.allocated_minutes * 60)) / (activeTask.allocated_minutes * 60)) * 100;
-                    if (percentOver < 0) return HILLTOP_COLORS.green;
-                    if (percentOver < 20) return HILLTOP_COLORS.yellow;
-                    if (percentOver < 50) return HILLTOP_COLORS.orangeWarn;
-                    return HILLTOP_COLORS.red;
-                };
-
-                const formatTime = (seconds) => {
-                    const mins = Math.floor(seconds / 60);
-                    const secs = seconds % 60;
-                    return `${mins}:${secs.toString().padStart(2, '0')}`;
-                };
-
+            if (screen === 'issue') {
                 return (
-                    <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
-                        <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-                            <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>{activeTask.task_name}</h2>
-                            
-                            <div style={{
-                                background: getTimerColor(),
-                                color: 'white',
-                                padding: '40px',
-                                borderRadius: '12px',
-                                textAlign: 'center',
-                                marginBottom: '20px'
-                            }}>
-                                <div style={{ fontSize: '48px', fontWeight: 'bold', marginBottom: '10px' }}>
-                                    {formatTime(timer)}
+                    <div style={{ minHeight: '100vh' }}>
+                        <TopBar worker={worker} onLogout={logout} sub={`${selectedVan.chassis_number} · ${activeTask.task_name}`} />
+                        <div className="fu" style={{ maxWidth: 560, margin: '0 auto', padding: 20 }}>
+                            <button onClick={() => { setRunning(true); setScreen('active'); }} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 15, fontWeight: 600, cursor: 'pointer', padding: 0, marginBottom: 14 }}>‹ Back to task</button>
+                            <div className="cond" style={{ fontSize: 26, fontWeight: 700, textTransform: 'uppercase' }}>{issueMode === 'help' ? 'Request help' : 'Why are you pausing?'}</div>
+                            <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 18 }}>Your supervisor sees this straight away.</div>
+
+                            {ISSUE_REASONS.map(r => (
+                                <div key={r} onClick={() => setIssueReason(r)} className="tap" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 15, marginBottom: 9, borderRadius: 11, border: `2px solid ${issueReason === r ? 'var(--orange)' : 'var(--line)'}`, background: issueReason === r ? '#FEF7EA' : 'var(--card)', cursor: 'pointer' }}>
+                                    <div style={{ width: 20, height: 20, borderRadius: 20, border: `2px solid ${issueReason === r ? 'var(--orange)' : '#C7CCD4'}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                        {issueReason === r && <div style={{ width: 10, height: 10, borderRadius: 10, background: 'var(--orange)' }} />}
+                                    </div>
+                                    <span style={{ fontWeight: 600, fontSize: 16 }}>{r}</span>
                                 </div>
-                                <div style={{ fontSize: '16px' }}>Allocated: {activeTask.allocated_minutes} min</div>
-                            </div>
-
-                            <button
-                                onClick={handlePause}
-                                style={{
-                                    width: '100%',
-                                    padding: '14px',
-                                    background: HILLTOP_COLORS.red,
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    fontSize: '16px',
-                                    fontWeight: 'bold',
-                                    marginBottom: '12px',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                ⏸️ PAUSE
-                            </button>
-
-                            <button
-                                onClick={finishTask}
-                                style={{
-                                    width: '100%',
-                                    padding: '14px',
-                                    background: HILLTOP_COLORS.orange,
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    fontSize: '16px',
-                                    fontWeight: 'bold',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                ✓ FINISH TASK
-                            </button>
-                        </div>
-                    </div>
-                );
-            }
-
-            // PAUSE REASON SELECTION
-            if (screen === 'pause-reason') {
-                return (
-                    <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
-                        <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-                            <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>Why are you pausing?</h2>
-                            
-                            {PAUSE_REASONS.map((reason, idx) => (
-                                <button
-                                    key={idx}
-                                    onClick={() => confirmPause(reason)}
-                                    style={{
-                                        width: '100%',
-                                        padding: '14px',
-                                        background: 'white',
-                                        color: HILLTOP_COLORS.charcoal,
-                                        border: `2px solid ${HILLTOP_COLORS.orange}`,
-                                        borderRadius: '8px',
-                                        marginBottom: '10px',
-                                        fontSize: '16px',
-                                        fontWeight: 'bold',
-                                        cursor: 'pointer',
-                                        textAlign: 'left'
-                                    }}
-                                >
-                                    {reason}
-                                </button>
                             ))}
+
+                            <textarea value={issueNote} onChange={e => setIssueNote(e.target.value)} placeholder="Add a note (optional) — e.g. which part, which drawing…"
+                                style={{ width: '100%', padding: 14, fontSize: 15, border: '2px solid var(--line)', borderRadius: 11, minHeight: 80, marginTop: 8, marginBottom: 14, resize: 'none' }} />
+
+                            <button onClick={submitIssue} disabled={loading} style={{ width: '100%', padding: 16, background: 'var(--ink)', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>
+                                {loading ? 'Sending…' : issueMode === 'help' ? 'Send to supervisor' : 'Submit & pause'}
+                            </button>
                         </div>
                     </div>
                 );
             }
 
-            // PHOTOS SCREEN
             if (screen === 'photos') {
                 const angles = ['Front', 'Left', 'Right', 'Back'];
                 return (
-                    <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
-                        <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-                            <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>Take Photos (4 angles)</h2>
-                            
-                            {angles.map((angle, idx) => (
-                                <button
-                                    key={idx}
-                                    onClick={() => setPhotos([...photos, angle])}
-                                    style={{
-                                        width: '100%',
-                                        padding: '16px',
-                                        background: photos.includes(angle) ? HILLTOP_COLORS.green : HILLTOP_COLORS.orange,
-                                        color: 'white',
-                                        border: 'none',
-                                        borderRadius: '8px',
-                                        marginBottom: '12px',
-                                        fontSize: '16px',
-                                        fontWeight: 'bold',
-                                        cursor: 'pointer'
-                                    }}
-                                >
-                                    {photos.includes(angle) ? '✓' : '📷'} Photo: {angle}
-                                </button>
-                            ))}
-
-                            <button
-                                onClick={uploadPhotos}
-                                disabled={photos.length < 4}
-                                style={{
-                                    width: '100%',
-                                    padding: '14px',
-                                    background: photos.length === 4 ? HILLTOP_COLORS.orange : '#ccc',
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    fontSize: '16px',
-                                    fontWeight: 'bold',
-                                    marginTop: '20px',
-                                    cursor: photos.length === 4 ? 'pointer' : 'not-allowed'
-                                }}
-                            >
+                    <div style={{ minHeight: '100vh' }}>
+                        <TopBar worker={worker} onLogout={logout} sub="End of day" />
+                        <div className="fu" style={{ maxWidth: 560, margin: '0 auto', padding: 20 }}>
+                            <div className="cond" style={{ fontSize: 26, fontWeight: 700, textTransform: 'uppercase' }}>Capture your work</div>
+                            <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 20 }}>Take 4 photos of the chassis before sign-off.</div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 18 }}>
+                                {angles.map(a => {
+                                    const taken = photos.includes(a);
+                                    return (
+                                        <button key={a} onClick={() => !taken && setPhotos([...photos, a])}
+                                            style={{ padding: '28px 12px', borderRadius: 14, border: `2px solid ${taken ? 'var(--green)' : 'var(--line)'}`, background: taken ? 'var(--green-bg)' : 'var(--card)', cursor: 'pointer', textAlign: 'center' }}>
+                                            <div className="cond" style={{ fontSize: 20, fontWeight: 700, color: taken ? 'var(--green)' : 'var(--ink)' }}>{taken ? '✓ ' : ''}{a}</div>
+                                            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{taken ? 'Captured' : 'Tap to capture'}</div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <button onClick={submitPhotos} disabled={photos.length < 4} style={{ width: '100%', padding: 16, background: photos.length === 4 ? 'var(--orange)' : '#D6D9DE', color: 'var(--ink)', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>
                                 Continue ({photos.length}/4)
                             </button>
                         </div>
@@ -670,111 +602,22 @@
                 );
             }
 
-            // SUPERVISOR SIGN-OFF
-            if (screen === 'supervisor-signoff') {
+            if (screen === 'supervisor') {
                 return (
-                    <div style={{ minHeight: '100vh', background: HILLTOP_COLORS.light, padding: '20px' }}>
-                        <div style={{ maxWidth: '600px', margin: '0 auto' }}>
-                            {endOfDayTriggered ? (
-                                <>
-                                    <div style={{
-                                        background: 'white',
-                                        padding: '40px',
-                                        borderRadius: '12px',
-                                        textAlign: 'center',
-                                        marginBottom: '30px',
-                                        border: `3px solid ${HILLTOP_COLORS.yellow}`
-                                    }}>
-                                        <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '10px' }}>
-                                            ⏳ Awaiting Supervisor Sign-Off
-                                        </h2>
-                                        <p style={{ color: '#666', fontSize: '16px', marginBottom: '20px' }}>
-                                            Work for the day is complete. Waiting for supervisor approval.
-                                        </p>
-                                        <p style={{ color: HILLTOP_COLORS.orange, fontSize: '14px', fontWeight: 'bold' }}>
-                                            Photos have been taken and saved.
-                                        </p>
-                                    </div>
-
-                                    <h3 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px', textAlign: 'center' }}>
-                                        Supervisor PIN Required
-                                    </h3>
-                                </>
-                            ) : (
-                                <h2 style={{ color: HILLTOP_COLORS.charcoal, marginBottom: '20px' }}>Supervisor Approval</h2>
-                            )}
-                            
-                            <input
-                                type="password"
-                                placeholder="Supervisor PIN"
-                                value={supervisorPin}
-                                onChange={(e) => setSupervisorPin(e.target.value)}
-                                style={{
-                                    width: '100%',
-                                    padding: '12px',
-                                    fontSize: '16px',
-                                    border: `2px solid ${HILLTOP_COLORS.orange}`,
-                                    borderRadius: '8px',
-                                    marginBottom: '20px'
-                                }}
-                            />
-
-                            {!endOfDayTriggered && (
-                                <textarea
-                                    placeholder="Rejection reason (if rejecting)"
-                                    value={rejectionReason}
-                                    onChange={(e) => setRejectionReason(e.target.value)}
-                                    style={{
-                                        width: '100%',
-                                        padding: '12px',
-                                        fontSize: '16px',
-                                        border: `2px solid #ddd`,
-                                        borderRadius: '8px',
-                                        marginBottom: '20px',
-                                        minHeight: '80px',
-                                        fontFamily: 'inherit'
-                                    }}
-                                />
-                            )}
-
-                            <button
-                                onClick={supervisorApprove}
-                                disabled={!supervisorPin || loading}
-                                style={{
-                                    width: '100%',
-                                    padding: '14px',
-                                    background: HILLTOP_COLORS.green,
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    fontSize: '16px',
-                                    fontWeight: 'bold',
-                                    marginBottom: '12px',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                ✓ APPROVE
+                    <div style={{ minHeight: '100vh' }}>
+                        <TopBar worker={worker} onLogout={logout} sub="Supervisor sign-off" />
+                        <div className="fu" style={{ maxWidth: 480, margin: '0 auto', padding: 20 }}>
+                            <div style={{ background: 'var(--amber-bg)', border: '2px solid #F0D38A', borderRadius: 14, padding: 24, textAlign: 'center', marginBottom: 22 }}>
+                                <div className="cond" style={{ fontSize: 22, fontWeight: 700, textTransform: 'uppercase' }}>Awaiting supervisor sign-off</div>
+                                <div style={{ color: '#8A6D1E', fontSize: 14, marginTop: 6 }}>{worker.name}'s work for {fmtDate(todayStr())} is complete. Photos saved.</div>
+                            </div>
+                            <div className="cond" style={{ fontSize: 16, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 10 }}>Supervisor PIN</div>
+                            <input type="tel" inputMode="numeric" value={supPin} onChange={e => setSupPin(e.target.value)} placeholder="••••"
+                                style={{ width: '100%', padding: 16, fontSize: 24, textAlign: 'center', letterSpacing: '0.4em', border: '2px solid var(--line)', borderRadius: 12, marginBottom: 16, fontWeight: 700 }} />
+                            <button onClick={supervisorApprove} disabled={loading || !supPin} style={{ width: '100%', padding: 16, background: 'var(--green)', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer', opacity: (loading || !supPin) ? 0.5 : 1 }}>
+                                {loading ? 'Signing off…' : 'Approve & sign off day'}
                             </button>
-
-                            {!endOfDayTriggered && (
-                                <button
-                                    onClick={supervisorReject}
-                                    disabled={!supervisorPin || !rejectionReason || loading}
-                                    style={{
-                                        width: '100%',
-                                        padding: '14px',
-                                        background: HILLTOP_COLORS.red,
-                                        color: 'white',
-                                        border: 'none',
-                                        borderRadius: '8px',
-                                        fontSize: '16px',
-                                        fontWeight: 'bold',
-                                        cursor: 'pointer'
-                                    }}
-                                >
-                                    ✗ REJECT
-                                </button>
-                            )}
+                            <button onClick={() => setScreen('photos')} style={{ width: '100%', padding: 14, marginTop: 10, background: 'none', color: 'var(--muted)', border: 'none', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>‹ Back to photos</button>
                         </div>
                     </div>
                 );
@@ -783,8 +626,7 @@
             return null;
         };
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<HilltopProductionApp />);
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
     </script>
 </body>
 </html>
